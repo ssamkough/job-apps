@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Pooled connection used by the app (e.g. Neon's "-pooler" host).
+  url       = env("DATABASE_URL")
+  // Direct connection used by `prisma migrate`. Same value as DATABASE_URL
+  // unless you use a connection pooler.
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id              String        @id @default(cuid())
+  email           String        @unique
+  name            String?
+  passwordHash    String
+  // Null until the user clicks the link we email them. Gates AI features.
+  emailVerifiedAt DateTime?
+  createdAt       DateTime      @default(now())
+  sessions        Session[]
+  tokens          AuthToken[]
+  applications    Application[]
+  resumes         Resume[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  // SHA-256 of the cookie token. The raw token only ever lives in the cookie.
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// One-time tokens for password reset and email verification. Only the SHA-256
+// of the token is stored; the raw token only exists in the emailed link.
+model AuthToken {
+  id        String    @id @default(cuid())
+  userId    String
+  // PASSWORD_RESET | EMAIL_VERIFY
+  type      String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+// Fixed-window counters for rate limiting, kept in Postgres so no Redis is
+// needed. See src/lib/rate-limit.ts.
+model RateLimit {
+  key         String
+  windowStart DateTime
+  count       Int      @default(0)
+
+  @@id([key, windowStart])
+  @@index([windowStart])
+}
+
+model Resume {
+  id           String        @id @default(cuid())
+  userId       String
+  // Human label, e.g. "Backend – 2026".
+  label        String
+  fileName     String
+  mimeType     String
+  size         Int
+  // Relative to the uploads root; never exposed to the client.
+  storageKey   String        @unique
+  createdAt    DateTime      @default(now())
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@index([userId])
+}
+
+model Application {
+  id              String        @id @default(cuid())
+  userId          String
+  company         String
+  jobTitle        String
+  jobUrl          String?
+  location        String?
+  // REMOTE | HYBRID | ONSITE
+  workType        String?
+  salary          String?
+  source          String?
+  // See src/lib/constants.ts for allowed values.
+  status          String        @default("APPLIED")
+  // Date only.
+  dateApplied     DateTime?     @db.Date
+  jobDescription  String?
+  notes           String?
+  coverLetter     String?
+  contactName     String?
+  contactEmail    String?
+  resumeId        String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  // Last time the status changed (or was confirmed). The planned reminder
+  // feature will key off this.
+  statusUpdatedAt DateTime      @default(now())
+  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume          Resume?       @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  events          StatusEvent[]
+
+  @@index([userId, status])
+  @@index([userId, dateApplied])
+}
+
+model StatusEvent {
+  id            String      @id @default(cuid())
+  applicationId String
+  fromStatus    String?
+  toStatus      String
+  createdAt     DateTime    @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+}
