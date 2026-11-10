@@ -482,6 +482,17 @@ describe("AI cover letter route", () => {
     expect((await post()).status).toBe(401);
   });
 
+  it("is a 404 when the AI_ENABLED flag is off (unset, empty, or anything but 'true')", async () => {
+    for (const value of [undefined, "", "false", "1"]) {
+      if (value === undefined) vi.stubEnv("AI_ENABLED", undefined as unknown as string);
+      else vi.stubEnv("AI_ENABLED", value);
+      const res = await post();
+      expect(res.status, `AI_ENABLED=${String(value)}`).toBe(404);
+    }
+    vi.unstubAllEnvs();
+    expect((await post()).status).toBe(401); // back on: now reaches the auth check
+  });
+
   it("requires a verified email, and never calls the model otherwise", async () => {
     await signInAs(await makeUser({ verified: false }));
     const res = await post();

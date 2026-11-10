@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState } from "react";
 import type { FormState } from "@/lib/form-state";
 import {
+  MAX_RESUME_MB,
   STATUSES,
   STATUS_LABELS,
   WORK_TYPES,
@@ -39,12 +40,14 @@ export function ApplicationForm({
   action,
   initial,
   resumes,
+  aiEnabled = false,
   submitLabel,
   saved,
 }: {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   initial: ApplicationFormValues;
   resumes: ResumeOption[];
+  aiEnabled?: boolean;
   submitLabel: string;
   saved?: boolean;
 }) {
@@ -166,7 +169,11 @@ export function ApplicationForm({
                 label="Job description"
                 htmlFor="jobDescription"
                 error={err.jobDescription}
-                hint="Paste it here. It's used to tailor your AI cover letter."
+                hint={
+                  aiEnabled
+                    ? "Paste it here. It's used to tailor your AI cover letter."
+                    : "Paste it here to keep it with this application."
+                }
                 className="sm:col-span-2"
               >
                 <textarea
@@ -184,6 +191,7 @@ export function ApplicationForm({
             <CoverLetterEditor
               defaultValue={v("coverLetter")}
               error={err.coverLetter}
+              aiEnabled={aiEnabled}
             />
           </Card>
 
@@ -254,7 +262,7 @@ export function ApplicationForm({
                 label="Or upload a new one"
                 htmlFor="resumeFile"
                 error={err.resumeFile}
-                hint="PDF, DOC, or DOCX, up to 5 MB. Overrides the selection above."
+                hint={`PDF, DOC, or DOCX, up to ${MAX_RESUME_MB} MB. Overrides the selection above.`}
               >
                 <input
                   id="resumeFile"

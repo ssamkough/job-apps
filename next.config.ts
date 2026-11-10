@@ -45,8 +45,9 @@ const nextConfig: NextConfig = {
   },
   experimental: {
     serverActions: {
-      // Resume uploads go through server actions (max file size is 5 MB).
-      bodySizeLimit: "6mb",
+      // Resume uploads go through server actions (max file size is 4 MB, see
+      // MAX_RESUME_MB). Vercel itself rejects request bodies over 4.5 MB.
+      bodySizeLimit: "4.5mb",
     },
   },
   async headers() {

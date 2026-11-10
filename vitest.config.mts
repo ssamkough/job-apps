@@ -20,6 +20,7 @@ export default defineConfig({
       DATABASE_URL: TEST_DB,
       DIRECT_URL: TEST_DB,
       STORAGE_DRIVER: "local",
+      AI_ENABLED: "true",
     },
     // Tests share one Postgres database, so run files one at a time.
     fileParallelism: false,

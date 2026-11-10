@@ -51,10 +51,93 @@ a clear "try again tomorrow" instead of the provider rejecting mail.
 | **Ollama** (self-run) | Free (your hardware and electricity) | Only works while your machine is on and reachable; see below |
 | **Cloudflare Tunnel** | Free | Needs a Cloudflare account (and a domain on Cloudflare for a stable hostname) |
 
-## Where does the AI run?
+## Launch layout: Vercel + Neon + R2 + Brevo, no AI
 
-The model runs on **your machine** with Ollama, so the web app must be able to
-reach it. Pick one layout:
+Nothing runs on your machine. AI is **off** (leave `AI_ENABLED` unset): the
+"Write with AI" button is hidden, `/api/cover-letter` returns 404, and the
+privacy/terms pages don't mention AI.
+
+```
+Browser ──► Vercel (Next.js) ──► Neon Postgres   (pooled URL)
+                  ├──────────► Cloudflare R2     (resume files, private bucket)
+                  └──────────► Brevo SMTP        (verification + reset email)
+```
+
+### 1. Neon (database)
+
+1. Create a project; pick the region closest to where you'll run Vercel
+   functions (e.g. AWS `us-east-1` with Vercel `iad1`). Keep app and DB in the
+   same region: every query pays that round trip.
+2. From **Connect**, copy both strings:
+   - **Pooled** host (contains `-pooler`) → `DATABASE_URL`. Append
+     `&pgbouncer=true&connect_timeout=15` (Prisma 6 needs `pgbouncer=true`
+     behind Neon's PgBouncer pooler; the timeout tolerates the idle wake-up).
+   - **Direct** host (no `-pooler`) → `DIRECT_URL`. Migrations use this one.
+3. If the string has `channel_binding=require`, remove it and keep
+   `sslmode=require`.
+
+### 2. Cloudflare R2 (resume files)
+
+1. Enable R2 (needs a payment method on file; you're only charged beyond the
+   free tier) and create a **private** bucket. Don't enable public access: the
+   app serves downloads through an authenticated route.
+2. Create an **API token** with *Object Read & Write*, scoped to that bucket.
+3. Values: `S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com`,
+   `S3_REGION=auto`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`,
+   `STORAGE_DRIVER=s3`.
+
+### 3. Brevo (email)
+
+1. Create an account, then **Senders, domains & dedicated IPs → Domains**:
+   add your domain and add the DKIM/DMARC records Brevo shows at your DNS host.
+   A free mailbox (`@gmail.com`) as the sender will be rejected or spam-foldered.
+2. **SMTP & API → SMTP**: note the SMTP **login** (it is not your account
+   email) and create an SMTP **key**.
+3. Values: `SMTP_HOST=smtp-relay.brevo.com`, `SMTP_PORT=587`, `SMTP_USER`,
+   `SMTP_PASS`, `EMAIL_FROM="Job Tracker <noreply@yourdomain.com>"`,
+   `EMAIL_DAILY_LIMIT=270`.
+
+### 4. Run the migrations (once, from your laptop)
+
+Put the Neon **direct** string in a gitignored file (`.env*` is ignored) and
+apply the migrations with it. Don't run migrations from the pooled URL.
+
+```bash
+printf 'DATABASE_URL="…direct url…"\nDIRECT_URL="…direct url…"\n' > .env.neon
+node --env-file=.env.neon node_modules/.bin/prisma migrate deploy
+rm .env.neon
+```
+
+Re-run this for every future schema change **before** deploying the code that
+needs it. Never use `migrate reset` or `migrate dev` against this database.
+
+### 5. Vercel
+
+1. Import the GitHub repo. Framework preset: Next.js (defaults are right;
+   `postinstall` runs `prisma generate`).
+2. Set the environment variables below for **Production**.
+3. Deploy, then open `/api/health`; it should return `{"status":"ok"}`.
+
+| Variable | Value |
+| --- | --- |
+| `APP_URL` | Your public URL, no trailing slash (`https://yourdomain.com`, or the `*.vercel.app` URL until a domain is attached) |
+| `SUPPORT_EMAIL` | Address shown on privacy/terms |
+| `DATABASE_URL` / `DIRECT_URL` | Neon pooled (+ `pgbouncer=true`) / direct |
+| `STORAGE_DRIVER`, `S3_*` | R2 values above |
+| `SMTP_*`, `EMAIL_FROM`, `EMAIL_DAILY_LIMIT` | Brevo values above |
+| `AI_ENABLED` | **leave unset** |
+
+`APP_URL` must match the real URL exactly because verification and reset links
+are built from it. Change it, then redeploy, when you attach a custom domain.
+
+**Resume uploads are capped at 4 MB.** Vercel rejects function request bodies
+over 4.5 MB, and the file travels in the same request as the form.
+
+## Later: adding AI
+
+Set `AI_ENABLED=true` plus the `OLLAMA_*` variables. The model runs on
+**hardware you control** with Ollama (free only if you already own it), so the
+web app must be able to reach it. Pick one layout:
 
 ### A. Self-host everything on the Ollama machine (simplest, fully free)
 
@@ -100,7 +183,8 @@ APP_URL=https://jobs.example.com NODE_ENV=production npm start   # use pm2/syste
    `migrate reset`/`dev` there).
 4. Verify the email domain's SPF/DKIM/DMARC in your provider's dashboard.
 5. Sign up with a real address, confirm the email arrives and the link works,
-   then test password reset and an AI draft.
+   then test password reset, a resume upload and download (and an AI draft if
+   `AI_ENABLED=true`).
 6. Point an uptime monitor (e.g. UptimeRobot free) at `/api/health`
    (returns `{"status":"ok"}` or 503).
 7. Read `/privacy` and `/terms`. They're plain-language templates matching what

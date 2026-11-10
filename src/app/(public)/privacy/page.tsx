@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { aiEnabled } from "@/lib/features";
 import { SITE_NAME, supportEmail } from "@/lib/site";
 
 // Read SUPPORT_EMAIL at request time, not build time.
@@ -33,11 +34,13 @@ export default function PrivacyPage() {
         </ul>
       </Section>
 
-      <Section title="How AI drafts work">
-        When you ask for a cover letter draft, the job details, your instructions, and the
-        text of the resume you select are sent to an AI model that we run ourselves. They
-        are not sent to a third-party AI company, and we don&apos;t use your content to train models.
-      </Section>
+      {aiEnabled() && (
+        <Section title="How AI drafts work">
+          When you ask for a cover letter draft, the job details, your instructions, and the
+          text of the resume you select are sent to an AI model that we run ourselves. They
+          are not sent to a third-party AI company, and we don&apos;t use your content to train models.
+        </Section>
+      )}
 
       <Section title="Who else handles your data">
         <ul className="list-disc space-y-1 pl-5">

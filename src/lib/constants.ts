@@ -83,7 +83,10 @@ export const WORK_TYPE_LABELS: Record<WorkType, string> = {
   ONSITE: "On-site",
 };
 
-export const MAX_RESUME_BYTES = 5 * 1024 * 1024;
+// Vercel rejects function request bodies over 4.5 MB (413), and the upload
+// travels in the same request as the rest of the form. 4 MB leaves headroom.
+export const MAX_RESUME_MB = 4;
+export const MAX_RESUME_BYTES = MAX_RESUME_MB * 1024 * 1024;
 export const ALLOWED_RESUME_TYPES: Record<string, string> = {
   "application/pdf": "PDF",
   "application/msword": "DOC",

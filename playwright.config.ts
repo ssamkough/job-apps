@@ -33,6 +33,8 @@ export default defineConfig({
         APP_URL: `http://localhost:${PORT}`,
         STORAGE_DRIVER: "local",
         UPLOAD_DIR: "./data/e2e-uploads",
+        // E2E_AI=false exercises the no-AI launch configuration.
+        AI_ENABLED: process.env.E2E_AI === "false" ? "false" : "true",
         OLLAMA_BASE_URL: "http://127.0.0.1:11500",
         OLLAMA_MODEL: "mock",
         SMTP_HOST: "127.0.0.1",

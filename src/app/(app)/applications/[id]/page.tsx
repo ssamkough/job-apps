@@ -12,6 +12,7 @@ import { formatBytes, toDateInput } from "@/lib/format";
 import { Card } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
 import { ApplicationForm } from "@/components/application-form";
+import { aiEnabled } from "@/lib/features";
 import { DeleteButton } from "@/components/delete-button";
 import { LocalTime } from "@/components/local-time";
 
@@ -104,6 +105,7 @@ export default async function ApplicationPage({
           resumeId: app.resumeId ?? "",
         }}
         resumes={resumes}
+        aiEnabled={aiEnabled()}
         submitLabel="Save changes"
         saved={saved === "1"}
       />

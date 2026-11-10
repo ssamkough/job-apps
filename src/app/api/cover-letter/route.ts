@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { RULES, hit, retryMessage } from "@/lib/rate-limit";
 import { getCurrentUser } from "@/lib/auth";
+import { aiEnabled } from "@/lib/features";
 import {
   AiBusyError,
   AiTimeoutError,
@@ -24,6 +25,9 @@ const text = (form: FormData, key: string, max: number) => {
  * works for applications that haven't been saved yet.
  */
 export async function POST(req: Request) {
+  // Feature off: behave as if the endpoint doesn't exist.
+  if (!aiEnabled()) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 

@@ -1,9 +1,11 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, request, test, type Page } from "@playwright/test";
 import { makeDocx, makePdf } from "../src/test/files";
 
 const MAIL = "http://127.0.0.1:11501";
 const PASSWORD = "e2e-password-1";
 const NEW_PASSWORD = "e2e-password-2";
+// Matches playwright.config.ts: E2E_AI=false runs the no-AI launch configuration.
+const AI = process.env.E2E_AI !== "false";
 
 type Mail = { to: string; subject: string; text: string };
 const stamp = Date.now();
@@ -116,7 +118,26 @@ test.describe("desktop journey", () => {
     await expect(page.getByText("Verify your email.")).toBeVisible();
   });
 
+  test("with AI_ENABLED off there is no AI button and the endpoint is a 404", async () => {
+    test.skip(AI, "runs only with E2E_AI=false (the no-AI launch configuration)");
+    await addApplication(page, { company: "Plain Co", jobTitle: "Dev" });
+    await expect(page.getByLabel("Cover letter")).toBeVisible(); // still a normal textarea
+    await expect(page.getByRole("button", { name: "✨ Write with AI" })).toHaveCount(0);
+    // Nothing in the signed-in UI (banner, hints, placeholder) may mention AI...
+    await expect(page.getByText(/\bAI\b/)).toHaveCount(0);
+    await expect(page.getByPlaceholder(/\bAI\b/)).toHaveCount(0);
+    // ...nor the public pages (the privacy policy must not describe AI processing that isn't happening).
+    const anon = await request.newContext({ baseURL: "http://localhost:3100" });
+    for (const path of ["/", "/privacy", "/terms"]) {
+      const html = await (await anon.get(path)).text();
+      expect(html, path).not.toMatch(/\bAI\b/);
+    }
+    await anon.dispose();
+    expect((await page.request.post("/api/cover-letter", { multipart: { company: "A", jobTitle: "B" } })).status()).toBe(404);
+  });
+
   test("AI drafts are blocked until the email is verified", async () => {
+    test.skip(!AI, "AI is disabled in this run");
     await addApplication(page, { company: "Blocked Co", jobTitle: "Dev" });
     await page.getByRole("button", { name: "✨ Write with AI" }).click();
     await page.getByRole("button", { name: "Generate draft" }).click();
@@ -243,6 +264,7 @@ test.describe("desktop journey", () => {
   });
 
   test("AI cover letter draft uses the resume, can be undone, and persists on save", async () => {
+    test.skip(!AI, "AI is disabled in this run");
     await page.getByRole("button", { name: "✨ Write with AI" }).click();
     await page.getByLabel("Anything to emphasize? (optional)").fill("Mention leadership");
     await page.getByRole("button", { name: "Generate draft" }).click();

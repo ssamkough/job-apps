@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { createApplication } from "@/app/actions/applications";
+import { aiEnabled } from "@/lib/features";
 import { todayDateInput } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
 import {
@@ -47,6 +48,7 @@ export default async function NewApplicationPage() {
         action={createApplication}
         initial={{ ...empty, dateApplied: todayDateInput() }}
         resumes={resumes}
+        aiEnabled={aiEnabled()}
         submitLabel="Add application"
       />
     </>

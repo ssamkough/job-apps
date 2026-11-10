@@ -11,9 +11,12 @@ import { Button, Field, inputClass } from "@/components/ui";
 export function CoverLetterEditor({
   defaultValue,
   error,
+  aiEnabled = false,
 }: {
   defaultValue: string;
   error?: string;
+  /** When false this is a plain textarea: no AI button, panel, or request. */
+  aiEnabled?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
@@ -74,6 +77,7 @@ export function CoverLetterEditor({
         <label htmlFor="coverLetter" className="block text-sm font-medium text-zinc-700">
           Cover letter
         </label>
+        {aiEnabled && (
         <div className="flex items-center gap-2">
           {previous !== null && (
             <Button variant="ghost" className="px-2 py-1 text-xs" onClick={undo}>
@@ -94,9 +98,10 @@ export function CoverLetterEditor({
             ✨ Write with AI
           </Button>
         </div>
+        )}
       </div>
 
-      {open && (
+      {aiEnabled && open && (
         <div className="mb-3 space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
           <p className="text-xs text-zinc-600">
             Uses the company, job title, job description, and the resume you&apos;ve
@@ -148,7 +153,11 @@ export function CoverLetterEditor({
         rows={14}
         defaultValue={defaultValue}
         maxLength={10000}
-        placeholder="Write your cover letter here, or let AI draft one."
+        placeholder={
+          aiEnabled
+            ? "Write your cover letter here, or let AI draft one."
+            : "Write or paste your cover letter here."
+        }
         aria-invalid={!!error}
         className={inputClass}
       />

@@ -25,8 +25,10 @@ npm run dev                       # http://localhost:3000
 
 - **Email in development:** leave `SMTP_HOST` empty. Verification and reset
   emails are printed in the server terminal (including the link to click).
-- **AI drafts:** `ollama pull qwen3.8:27b` (or set `OLLAMA_MODEL` to any model
-  you have). Drafts need a *verified* email address; in dev, click the link
+- **AI drafts (off by default):** set `AI_ENABLED="true"` in `.env`, then
+  `ollama pull qwen3.8:27b` (or set `OLLAMA_MODEL` to any model
+  you have). With the flag off, the "Write with AI" button is hidden and
+  `/api/cover-letter` returns 404; the cover letter is just a textarea. Drafts need a *verified* email address; in dev, click the link
   from the terminal. A local model takes a minute or two per letter.
 - **Dev test account:** `node --env-file=.env scripts/create-test-account.mjs`
   creates the verified account described in `.test-account.local` (gitignored).
@@ -49,7 +51,9 @@ npx playwright install chromium
 
 `npm test` and the e2e run only ever touch databases named `*_test` / `*_e2e`
 (the scripts refuse anything else). The e2e run uses a mock Ollama and a local
-SMTP sink, so it is offline and free. It also writes mobile screenshots to
+SMTP sink, so it is offline and free. Run `E2E_AI=false npm run test:e2e` to
+test the no-AI configuration (AI specs skip; a check that the AI UI is gone runs
+instead). It also writes mobile screenshots to
 `e2e/screenshots/`.
 
 ## Where things live

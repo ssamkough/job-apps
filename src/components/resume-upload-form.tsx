@@ -2,6 +2,7 @@
 
 import { useActionState, useEffect, useRef } from "react";
 import { uploadResume } from "@/app/actions/resumes";
+import { MAX_RESUME_MB } from "@/lib/constants";
 import type { FormState } from "@/lib/form-state";
 import { Card, Field, inputClass } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
@@ -37,7 +38,7 @@ export function ResumeUploadForm() {
           label="File"
           htmlFor="file"
           error={err.file}
-          hint="PDF, DOC, or DOCX, up to 5 MB."
+          hint={`PDF, DOC, or DOCX, up to ${MAX_RESUME_MB} MB.`}
         >
           <input
             id="file"

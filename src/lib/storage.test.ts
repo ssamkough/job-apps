@@ -11,6 +11,7 @@ import {
   saveResumeFile,
   type ResumeUpload,
 } from "@/lib/storage";
+import { MAX_RESUME_BYTES, MAX_RESUME_MB } from "@/lib/constants";
 import { OLE_HEADER, fileFrom, makeDocx, makePdf } from "@/test/files";
 
 const upload = (text = "hello resume"): ResumeUpload => {
@@ -147,8 +148,8 @@ describe("readResumeUpload", () => {
   it("rejects empty, missing and oversized files", async () => {
     expect((await readResumeUpload(null)).ok).toBe(false);
     expect((await readResumeUpload(fileFrom(Buffer.alloc(0), "a.pdf"))).ok).toBe(false);
-    const big = await readResumeUpload(fileFrom(Buffer.alloc(5 * 1024 * 1024 + 1), "big.pdf"));
-    expect(big).toEqual({ ok: false, error: "File is too large (max 5 MB)" });
+    const big = await readResumeUpload(fileFrom(Buffer.alloc(MAX_RESUME_BYTES + 1), "big.pdf"));
+    expect(big).toEqual({ ok: false, error: `File is too large (max ${MAX_RESUME_MB} MB)` });
   });
 
   it("strips path components and control characters from the file name", async () => {

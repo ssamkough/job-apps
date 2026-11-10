@@ -7,6 +7,7 @@ import {
   DeleteAccountForm,
   ResendVerificationButton,
 } from "@/components/settings-forms";
+import { aiEnabled } from "@/lib/features";
 import { formatDate } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -64,7 +65,9 @@ export default async function SettingsPage() {
           {!user.emailVerifiedAt && (
             <div className="mt-4">
               <p className="mb-3 text-sm text-zinc-600">
-                Verify your email to use AI cover letter drafts and to make sure you can recover your account.
+                {aiEnabled()
+                  ? "Verify your email to use AI cover letter drafts and to make sure you can recover your account."
+                  : "Verify your email to make sure you can recover your account."}
               </p>
               <ResendVerificationButton />
             </div>

@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
+import { aiEnabled } from "@/lib/features";
 import { LinkButton } from "@/components/ui";
 import { SiteFooter } from "@/components/site-footer";
 
-const features = [
+const features = (ai: boolean) => [
   {
     title: "Every application in one place",
     body: "Company, role, link, salary, contacts, notes, and the job description, all attached to the application.",
@@ -14,7 +15,9 @@ const features = [
   },
   {
     title: "Resume and cover letter included",
-    body: "Attach the exact resume you sent and draft a tailored cover letter with AI help.",
+    body: ai
+      ? "Attach the exact resume you sent and draft a tailored cover letter with AI help."
+      : "Attach the exact resume you sent and keep the cover letter with the application.",
   },
 ];
 
@@ -58,7 +61,7 @@ export default async function Home() {
         </section>
 
         <section className="grid gap-4 pb-20 sm:grid-cols-3">
-          {features.map((f) => (
+          {features(aiEnabled()).map((f) => (
             <div
               key={f.title}
               className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm"
