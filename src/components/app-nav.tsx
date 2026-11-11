@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logout } from "@/app/actions/auth";
+import { LogoMark } from "@/components/logo";
 import { cx } from "@/components/ui";
 
 const items = [
@@ -23,9 +24,7 @@ function Brand() {
       href="/dashboard"
       className="flex items-center gap-2 font-semibold text-zinc-900"
     >
-      <span className="grid h-8 w-8 place-items-center rounded-lg bg-indigo-600 text-sm text-white">
-        JT
-      </span>
+      <LogoMark />
       Job Tracker
     </Link>
   );

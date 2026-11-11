@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { aiEnabled } from "@/lib/features";
 import { LinkButton } from "@/components/ui";
+import { LogoMark } from "@/components/logo";
 import { SiteFooter } from "@/components/site-footer";
 
 const features = (ai: boolean) => [
@@ -29,9 +30,7 @@ export default async function Home() {
     <div className="flex flex-1 flex-col">
       <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
         <span className="flex items-center gap-2 font-semibold text-zinc-900">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-indigo-600 text-sm text-white">
-            JT
-          </span>
+          <LogoMark />
           Job Tracker
         </span>
         <nav className="flex items-center gap-2">

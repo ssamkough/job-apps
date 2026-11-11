@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { requireAdmin } from "@/lib/admin";
+import { LogoMark } from "@/components/logo";
 import { SiteFooter } from "@/components/site-footer";
 
 // Admin pages are never for search engines, even though they sit behind auth.
@@ -19,9 +20,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       <header className="border-b border-zinc-200 bg-white">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-10">
           <Link href="/admin" className="flex items-center gap-2 font-semibold text-zinc-900">
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-zinc-900 text-sm text-white">
-              JT
-            </span>
+            <LogoMark />
             Admin
           </Link>
           <div className="flex items-center gap-4 text-sm">
