@@ -13,7 +13,7 @@ import { plural } from "@/lib/format";
 import { Card, EmptyState, Notice, PageHeader, buttonClass, cx, inputClass } from "@/components/ui";
 import { UserList } from "./user-list";
 
-export const metadata: Metadata = { title: "Users" };
+export const metadata: Metadata = { title: { absolute: "Admin" } };
 
 type SearchParams = { q?: string | string[]; page?: string | string[] };
 
@@ -148,7 +148,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   if (!overview || !list) {
     return (
       <>
-        <PageHeader title="Users" />
+        <PageHeader title="Admin" />
         <Notice tone="error">
           Couldn&apos;t load user data. Check that the database and Neon Auth are reachable, then
           reload.
@@ -160,7 +160,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   return (
     <>
       <PageHeader
-        title="Users"
+        title="Admin"
         description="Everyone who has signed up, with their applications. Read-only."
       />
 
