@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { AuthApi, AuthError, AuthErrorCode, AuthResult, AuthUser, OtpType } from "@/lib/auth-api";
 
 /**
- * An in-memory stand-in for Neon Auth that mimics the behavior we verified
- * against a real Neon branch (see DEPLOYMENT.md): same error codes, the same
- * non-enumerating answers, OTP attempt limits, session revocation, and the
- * SDK's short-lived signed session cache.
+ * An in-memory stand-in for Neon Auth that mimics the behavior recorded
+ * against a real Neon branch in Nov 2026 (see e2e/mock-neon-auth.mjs for the
+ * list): same error codes, the same non-enumerating answers, OTP attempt
+ * limits, session revocation, and the SDK's short-lived signed session cache.
  *
  * It reads and writes cookies through the `jar` it is given, exactly like the
  * real SDK does through next/headers, so tests can inspect what a browser
@@ -41,7 +41,7 @@ export class FakeAuth implements AuthApi {
   private codes = new Map<string, { code: string; attempts: number }>();
   private n = 0;
 
-  /** Neon's managed Auth answers 404 for delete-user; flip to simulate it working. */
+  /** Neon's managed Auth answers 404 for delete-user (checked live); flip to simulate it working. */
   supportsDeleteUser = false;
   /** When set, every call answers like an unreachable provider. */
   outage = false;
@@ -184,10 +184,8 @@ export class FakeAuth implements AuthApi {
     if (down) return down;
     const u = this.users.get(email.toLowerCase());
     if (!u || u.password !== password) return fail(401, "INVALID_CREDENTIALS");
-    if (!u.verified) {
-      this.sendCode(u.email, "email-verification");
-      return fail(403, "EMAIL_NOT_VERIFIED");
-    }
+    // Only after the right password, and the real service sends no new code here.
+    if (!u.verified) return fail(403, "EMAIL_NOT_VERIFIED");
     this.startSession(u.id);
     return ok({ user: this.publicUser(u) });
   }
@@ -206,8 +204,9 @@ export class FakeAuth implements AuthApi {
     const down = this.down();
     if (down) return down;
     const u = this.users.get(email.toLowerCase());
-    // Same {success: true} for an unknown address; nothing is sent.
-    if (u && (type === "forget-password" ? u.verified : !u.verified)) this.sendCode(u.email, type);
+    // Same {success: true} for an unknown address (nothing is sent); any existing
+    // user gets a code, verified or not, for either type.
+    if (u) this.sendCode(u.email, type);
     return ok(null);
   }
 
@@ -234,6 +233,7 @@ export class FakeAuth implements AuthApi {
     if (err) return { data: null, error: err };
     const u = this.users.get(key)!;
     u.password = password;
+    u.verified = true; // a code from the inbox proves the address
     // "Revoke sessions on password reset" is switched on in our Neon Auth config.
     for (const [token, id] of this.sessions) if (id === u.id) this.sessions.delete(token);
     return ok(null);
@@ -258,18 +258,19 @@ export class FakeAuth implements AuthApi {
     if (down) return down;
     const u = this.currentUser();
     if (!u) return fail(401, "UNAUTHORIZED");
+    // The real service sets no cookies here: clearing the browser's is our job.
     for (const [token, id] of this.sessions) if (id === u.id) this.sessions.delete(token);
-    this.jar.delete(SESSION_COOKIE);
-    this.jar.delete(CACHE_COOKIE);
     return ok(null);
   }
 
   async deleteUser({ password }: { password: string }) {
     const down = this.down();
     if (down) return down;
-    if (!this.supportsDeleteUser) return fail(404, "REJECTED");
     const u = this.currentUser();
-    if (!u || u.password !== password) return fail(400, "INVALID_CREDENTIALS");
+    if (!u) return fail(401, "UNAUTHORIZED");
+    // Real service: 404 (endpoint not enabled) for any password, once signed in.
+    if (!this.supportsDeleteUser) return fail(404, "REJECTED");
+    if (u.password !== password) return fail(400, "INVALID_CREDENTIALS");
     this.users.delete(u.email);
     for (const [token, id] of this.sessions) if (id === u.id) this.sessions.delete(token);
     this.jar.delete(SESSION_COOKIE);

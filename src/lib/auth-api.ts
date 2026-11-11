@@ -1,9 +1,9 @@
 import "server-only";
-import { hasAuthCookie } from "@/lib/auth-cookies";
+import { hasAuthCookie, sessionTokenCookieHeader } from "@/lib/auth-cookies";
 import { mapSdkError, type AuthError, type AuthErrorCode, type SdkError } from "@/lib/auth-error-map";
 
 export type { AuthError, AuthErrorCode };
-import { getNeonAuth } from "@/lib/neon-auth";
+import { getNeonAuth, neonAuthBaseUrl } from "@/lib/neon-auth";
 
 /**
  * The only door from this app to Neon Auth. Server actions and `auth.ts` call
@@ -85,6 +85,43 @@ type EmailOtpApi = {
 };
 const emailOtp = () => getNeonAuth().emailOtp as unknown as EmailOtpApi;
 
+/**
+ * Neon Auth answers `get-session` for a revoked or expired token with `null`
+ * *and* Set-Cookie headers that delete the session cookies. The SDK applies
+ * those through `cookies().set()`, which Next refuses while a page is
+ * rendering ("Cookies can only be modified in a Server Action or Route
+ * Handler"), so the SDK throws. Unhandled, every page that looks at the
+ * session (/, /login, /signup, the whole app) would answer 500 for a browser
+ * that still holds a cookie for a revoked session (after a password reset or
+ * "sign out everywhere" on another device) until that cookie expires, and the
+ * person couldn't even reach the sign-in form. Seen against a real Neon branch.
+ */
+const isCookieWriteError = (e: unknown) =>
+  e instanceof Error && /cookies can only be modified/i.test(e.message);
+
+/**
+ * Asks Neon Auth for the session itself, ignoring the cookies it wants to
+ * set. Used only when the SDK couldn't finish because it was rendering. A
+ * valid session still comes back as a user; a revoked one as `null`.
+ */
+async function sessionWithoutSettingCookies(): Promise<SdkResult> {
+  const cookie = await sessionTokenCookieHeader();
+  if (!cookie) return { data: null };
+  let res: Response;
+  try {
+    res = await fetch(`${neonAuthBaseUrl()}/get-session`, {
+      headers: { cookie },
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch {
+    return { error: { status: 502, code: "NETWORK_ERROR" } };
+  }
+  if (res.status >= 500) return { error: { status: res.status, statusText: res.statusText } };
+  if (!res.ok) return { data: null };
+  return { data: await res.json().catch(() => null) };
+}
+
 const noData = () => null;
 const withUser = (data: unknown) => ({ user: normalize((data as { user: unknown }).user) });
 
@@ -96,7 +133,11 @@ const real: AuthApi = {
     if (!(await hasAuthCookie())) return { data: null, error: null };
     const auth = getNeonAuth();
     return call(
-      () => auth.getSession(fresh ? { query: { disableCookieCache: "true" } } : undefined),
+      () =>
+        auth.getSession(fresh ? { query: { disableCookieCache: "true" } } : undefined).catch((e: unknown) => {
+          if (isCookieWriteError(e)) return sessionWithoutSettingCookies();
+          throw e;
+        }),
       (data) => {
         const d = data as { user?: unknown; session?: unknown } | null;
         return d?.user && d.session ? { user: normalize(d.user) } : null;

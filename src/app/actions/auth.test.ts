@@ -235,6 +235,12 @@ describe("verify email", () => {
     expect(res.message).toMatch(/Too many attempts/);
   });
 
+  it("tells the truth about how long a code lives (5 minutes, measured on the real service)", async () => {
+    await pending();
+    const res = await resendVerificationCode({}, form({ email: "new@example.com" }));
+    expect(res.message).toMatch(/valid for 5 minutes/);
+  });
+
   it("resending answers the same for unknown and unverified addresses", async () => {
     await pending();
     const a = await resendVerificationCode({}, form({ email: "new@example.com" }));
@@ -281,13 +287,37 @@ describe("login", () => {
     const res = await run(() => login({}, form({ email: "a@example.com", password: PASSWORD })));
     expect(res).toEqual({ redirect: verifyUrl("a@example.com") });
     expect(h.jar.has(SESSION_COOKIE)).toBe(false);
-    expect(h.fake.lastCode("a@example.com")).toBeTruthy();
+    // Neon Auth sends nothing on sign-in and sign-up's code lives only minutes, so we ask for a new one.
+    expect(h.fake.outbox).toEqual([
+      expect.objectContaining({ to: "a@example.com", type: "email-verification" }),
+    ]);
   });
 
-  it("an unverified account with the wrong password learns nothing", async () => {
+  it("the fresh code sent at login really verifies the account", async () => {
+    h.fake.seedUser({ email: "a@example.com", verified: false });
+    await run(() => login({}, form({ email: "a@example.com", password: PASSWORD })));
+    const res = await run(() =>
+      verifyEmail({}, form({ email: "a@example.com", code: h.fake.lastCode("a@example.com")! })),
+    );
+    expect(res).toEqual({ redirect: "/dashboard?verified=1" });
+  });
+
+  it("an unverified account with the wrong password learns nothing and gets no email", async () => {
     h.fake.seedUser({ email: "a@example.com", verified: false });
     const res = await login({}, form({ email: "a@example.com", password: "nope-nope-nope" }));
     expect(res.message).toBe("Incorrect email or password");
+    expect(h.fake.outbox).toEqual([]);
+  });
+
+  it("logging in unverified can't be used to flood an inbox: the per-address email cap applies", async () => {
+    h.fake.seedUser({ email: "a@example.com", verified: false });
+    for (let i = 0; i < 6; i++) {
+      h.ip = `7.7.7.${i}`;
+      expect(await run(() => login({}, form({ email: "a@example.com", password: PASSWORD })))).toEqual({
+        redirect: verifyUrl("a@example.com"),
+      });
+    }
+    expect(h.fake.outbox).toHaveLength(4); // RULES.otpSendEmail.limit
   });
 
   it("locks an account after repeated failures even across IPs", async () => {
@@ -427,6 +457,21 @@ describe("password reset", () => {
     expect(h.fake.users.get("a@example.com")!.password).toBe("brand-new-pass");
     expect(h.fake.sessionCount(u.id)).toBe(0); // signed out everywhere
     expect(h.fake.sessions.has(otherSession)).toBe(true); // somebody else's session untouched
+  });
+
+  it("a reset code from the inbox also verifies a still-unverified address (as the real service does)", async () => {
+    h.fake.seedUser({ email: "a@example.com", verified: false });
+    await run(() => requestPasswordReset({}, form({ email: "a@example.com" })));
+    await flush();
+    expect(h.fake.lastCode("a@example.com")).toBeTruthy();
+    await run(() =>
+      resetPassword(
+        {},
+        form({ email: "a@example.com", code: h.fake.lastCode()!, password: "brand-new-pass", confirm: "brand-new-pass" }),
+      ),
+    );
+    const res = await run(() => login({}, form({ email: "a@example.com", password: "brand-new-pass" })));
+    expect(res).toEqual({ redirect: "/dashboard" });
   });
 
   it("looks identical for unknown emails and sends nothing", async () => {

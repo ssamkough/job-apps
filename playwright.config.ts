@@ -7,6 +7,8 @@ const PORT = 3100;
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.spec.ts",
+  // e2e/live is the opt-in smoke test for a deployed URL (npm run test:live).
+  testIgnore: "**/live/**",
   fullyParallel: false,
   workers: 1,
   timeout: 60_000,

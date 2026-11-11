@@ -1,14 +1,22 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The real adapter, with the Neon Auth SDK replaced by spies, so we can pin
 // down exactly what we send to it and how its answers are translated.
 const h = vi.hoisted(() => ({
   hasCookie: true,
+  /** The raw `name=value` of the session cookie as the browser sent it. */
+  tokenCookie: "__Secure-neon-auth.session_token=tok.sig%2Fabc" as string | null,
   sdk: {} as Record<string, unknown>,
 }));
 
-vi.mock("@/lib/auth-cookies", () => ({ hasAuthCookie: async () => h.hasCookie }));
-vi.mock("@/lib/neon-auth", () => ({ getNeonAuth: () => h.sdk }));
+vi.mock("@/lib/auth-cookies", () => ({
+  hasAuthCookie: async () => h.hasCookie,
+  sessionTokenCookieHeader: async () => h.tokenCookie,
+}));
+vi.mock("@/lib/neon-auth", () => ({
+  getNeonAuth: () => h.sdk,
+  neonAuthBaseUrl: () => "https://auth.example.test/neondb/auth",
+}));
 
 import { authApi } from "@/lib/auth-api";
 
@@ -17,6 +25,7 @@ const session = { id: "s1", token: "t" };
 
 beforeEach(() => {
   h.hasCookie = true;
+  h.tokenCookie = "__Secure-neon-auth.session_token=tok.sig%2Fabc";
   h.sdk = {
     getSession: vi.fn().mockResolvedValue({ data: { user, session }, error: null }),
     signIn: { email: vi.fn().mockResolvedValue({ data: { user }, error: null }) },
@@ -74,6 +83,62 @@ describe("getSession", () => {
     expect(await authApi().getSession()).toEqual({ data: null, error: null });
     h.sdk.getSession = vi.fn().mockResolvedValue({ data: { user, session: null }, error: null });
     expect(await authApi().getSession()).toEqual({ data: null, error: null });
+  });
+});
+
+// Real Neon Auth answers get-session for a revoked token with `null` plus
+// Set-Cookie headers that delete the cookies; the SDK applies them with
+// cookies().set(), which Next refuses while rendering, so the SDK throws.
+describe("getSession while rendering (the SDK can't set cookies)", () => {
+  const cookieError = () =>
+    new Error("Cookies can only be modified in a Server Action or Route Handler. Read more: https://nextjs.org/docs");
+  const answer = (body: unknown, status = 200) =>
+    vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }));
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    h.sdk.getSession = vi.fn().mockRejectedValue(cookieError());
+    fetchSpy = vi.spyOn(globalThis, "fetch");
+  });
+  afterEach(() => fetchSpy.mockRestore());
+
+  it("a revoked session reads as signed out, not as an outage", async () => {
+    fetchSpy.mockImplementation(answer(null));
+    expect(await authApi().getSession()).toEqual({ data: null, error: null });
+  });
+
+  it("asks Neon Auth with only the browser's session cookie, untouched", async () => {
+    fetchSpy.mockImplementation(answer(null));
+    await authApi().getSession();
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://auth.example.test/neondb/auth/get-session");
+    expect(init.headers).toEqual({ cookie: "__Secure-neon-auth.session_token=tok.sig%2Fabc" });
+  });
+
+  it("a still-valid session is returned as the user", async () => {
+    fetchSpy.mockImplementation(answer({ user, session }));
+    expect((await authApi().getSession()).data).toEqual({
+      user: { id: "u1", email: "a@example.com", name: "", emailVerified: true },
+    });
+  });
+
+  it("a provider outage is still reported as one", async () => {
+    fetchSpy.mockImplementation(answer({ message: "down" }, 503));
+    expect((await authApi().getSession()).error).toEqual({ code: "UNAVAILABLE", status: 503 });
+    fetchSpy.mockRejectedValue(new TypeError("fetch failed"));
+    expect((await authApi().getSession()).error).toEqual({ code: "UNAVAILABLE", status: 503 });
+  });
+
+  it("no session cookie in the request means signed out without a call", async () => {
+    h.tokenCookie = null;
+    expect(await authApi().getSession()).toEqual({ data: null, error: null });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("other SDK failures are not mistaken for it", async () => {
+    h.sdk.getSession = vi.fn().mockRejectedValue(new Error("boom"));
+    expect((await authApi().getSession()).error?.code).toBe("UNAVAILABLE");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

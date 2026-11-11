@@ -21,6 +21,13 @@ import { createNeonAuth } from "@neon/auth/next/server";
  */
 export const SESSION_CACHE_SECONDS = 60;
 
+/** Neon Auth's base URL (`…/neondb/auth`); throws when it isn't configured. */
+export function neonAuthBaseUrl(): string {
+  const baseUrl = process.env.NEON_AUTH_BASE_URL;
+  if (!baseUrl) throw new Error("NEON_AUTH_BASE_URL must be set");
+  return baseUrl.replace(/\/+$/, "");
+}
+
 type NeonAuth = ReturnType<typeof createNeonAuth>;
 let instance: NeonAuth | undefined;
 

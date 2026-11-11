@@ -1,11 +1,26 @@
 // A small stand-in for Neon Auth (managed Better Auth) so the e2e suite runs
 // offline, for free, and without sharing one real project's rate limits.
-// It implements only the endpoints the app uses and mirrors behavior verified
-// against a real Neon branch (see DEPLOYMENT.md): error codes, non-enumerating
-// answers, OTP attempt limits, "revoke sessions on password reset", the
-// trusted-origin check (INVALID_ORIGIN) and 404 for delete-user.
+// It implements only the endpoints the app uses and mirrors behavior recorded
+// against a real Neon branch in Nov 2026 (through this app, end to end):
+//   - error bodies are `{ message, code }` with Better Auth's own codes;
+//   - a verification / reset code is valid for 300 s, allows 3 wrong attempts
+//     (the 4th call answers 403 TOO_MANY_ATTEMPTS and the code is gone, even if
+//     that 4th attempt is the right code) and is spent by its first success;
+//   - sign-up for an existing address answers 200 with a made-up user, sends
+//     nothing and changes nothing; sign-in before verification sends NO code
+//     (403 EMAIL_NOT_VERIFIED, but only after the right password);
+//   - send-verification-otp answers { success: true } and sends a code for any
+//     EXISTING user, whatever their verification state, for both types;
+//   - resetting the password with a code also marks the address verified, and
+//     "revoke sessions on password reset" ends every session;
+//   - get-session with a revoked token answers 200 null AND Set-Cookie headers
+//     that delete the cookies (the SDK can't apply those while rendering);
+//   - upstream cookies are `SameSite=None; Partitioned` (the SDK rewrites them);
+//   - delete-user is not enabled: 401 without a session, else 404 with no body
+//     (even for a wrong password);
+//   - a POST without an Origin header is refused (MISSING_OR_NULL_ORIGIN).
 //
-// The real thing is exercised by e2e/live-auth.spec.ts (opt-in).
+// The real service is exercised by the opt-in e2e/live/smoke.spec.ts.
 //
 // Test hooks (not part of Better Auth):
 //   GET  /__otp?email=…&type=email-verification|forget-password  -> { code }
@@ -58,12 +73,20 @@ function startSession(res, user) {
   sessions.set(token, { userId: user.id, createdAt: now() });
   res.appendHeader(
     "set-cookie",
-    `${SESSION_COOKIE}=${token}; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=None`,
+    `${SESSION_COOKIE}=${token}; Max-Age=604800; Path=/; HttpOnly; Secure; SameSite=None; Partitioned`,
   );
   return token;
 }
-const endSessionCookie = (res) =>
-  res.appendHeader("set-cookie", `${SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=None`);
+// What the real service sends when it ends a session (sign-out, or a get-session
+// that finds the token revoked): all three cookies deleted.
+const endSessionCookies = (res) => {
+  for (const name of ["session_token", "session_data", "dont_remember"]) {
+    res.appendHeader(
+      "set-cookie",
+      `__Secure-neon-auth.${name}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=None; Partitioned`,
+    );
+  }
+};
 
 function sendCode(email, type) {
   const code = sixDigits();
@@ -100,6 +123,7 @@ const MESSAGES = {
   INVALID_OTP: "Invalid OTP",
   TOO_MANY_ATTEMPTS: "Too many attempts",
   INVALID_ORIGIN: "Invalid origin",
+  MISSING_OR_NULL_ORIGIN: "Missing or null Origin",
   INVALID_EMAIL_OR_PASSWORD: "Invalid email or password",
   INVALID_PASSWORD: "Invalid password",
   EMAIL_NOT_VERIFIED: "Email not verified",
@@ -123,7 +147,11 @@ async function readBody(req) {
 const routes = {
   "GET /get-session"(req, res) {
     const s = sessionOf(req);
-    if (!s) return json(res, 200, null);
+    if (!s) {
+      // Like the real service: a revoked or unknown token is told to clear its cookies.
+      if (cookieOf(req, SESSION_COOKIE)) endSessionCookies(res);
+      return json(res, 200, null);
+    }
     json(res, 200, {
       session: {
         id: s.token.slice(0, 8),
@@ -145,7 +173,10 @@ const routes = {
     const existing = users.get(email);
     // An existing address gets the same answer as a new one.
     if (existing) {
-      return json(res, 200, { token: null, user: publicUser({ ...existing, id: randomUUID(), verified: false }) });
+      return json(res, 200, {
+        token: null,
+        user: publicUser({ ...existing, id: randomUUID(), name: String(body.name ?? ""), verified: false }),
+      });
     }
     const user = { id: randomUUID(), email, name: String(body.name ?? ""), password, verified: false, createdAt: now() };
     users.set(email, user);
@@ -156,10 +187,8 @@ const routes = {
   async "POST /sign-in/email"(req, res, body) {
     const user = users.get(String(body.email ?? "").toLowerCase());
     if (!user || user.password !== body.password) return fail(res, 401, "INVALID_EMAIL_OR_PASSWORD");
-    if (!user.verified) {
-      sendCode(user.email, "email-verification");
-      return fail(res, 403, "EMAIL_NOT_VERIFIED");
-    }
+    // Only after the right password, and (unlike the sign-up flow) with no new code.
+    if (!user.verified) return fail(res, 403, "EMAIL_NOT_VERIFIED");
     const token = startSession(res, user);
     json(res, 200, { redirect: false, token, user: publicUser(user) });
   },
@@ -167,7 +196,7 @@ const routes = {
   "POST /sign-out"(req, res) {
     const s = sessionOf(req);
     if (s) sessions.delete(s.token);
-    endSessionCookie(res);
+    endSessionCookies(res);
     json(res, 200, { success: true });
   },
 
@@ -175,8 +204,9 @@ const routes = {
     const email = String(body.email ?? "").toLowerCase();
     const type = body.type;
     const user = users.get(email);
-    // Answers { success: true } whether or not the address exists.
-    if (user && (type === "forget-password" ? user.verified : !user.verified)) sendCode(email, type);
+    // Answers { success: true } whether or not the address exists; a code is
+    // stored for any existing user, verified or not, for either type.
+    if (user && (type === "forget-password" || type === "email-verification")) sendCode(email, type);
     json(res, 200, { success: true });
   },
 
@@ -200,6 +230,7 @@ const routes = {
     if (err) return fail(res, err === "INVALID_OTP" ? 400 : 403, err);
     const user = users.get(email);
     user.password = password;
+    user.verified = true; // a code from the inbox proves the address, even before sign-up verification
     revokeAll(user.id); // revoke_sessions_on_password_reset is on
     json(res, 200, { success: true });
   },
@@ -209,6 +240,7 @@ const routes = {
     if (!s) return fail(res, 401, "UNAUTHORIZED");
     if (s.user.password !== body.currentPassword) return fail(res, 400, "INVALID_PASSWORD");
     if (String(body.newPassword ?? "").length < 8) return fail(res, 400, "PASSWORD_TOO_SHORT");
+    if (String(body.newPassword ?? "").length > 128) return fail(res, 400, "PASSWORD_TOO_LONG");
     s.user.password = body.newPassword;
     if (body.revokeOtherSessions) {
       revokeAll(s.userId);
@@ -220,15 +252,16 @@ const routes = {
   "POST /revoke-sessions"(req, res) {
     const s = sessionOf(req);
     if (!s) return fail(res, 401, "UNAUTHORIZED");
-    revokeAll(s.userId);
-    endSessionCookie(res);
+    revokeAll(s.userId); // the real service sets no cookies here
     json(res, 200, { status: true });
   },
 
-  // Managed Neon Auth doesn't expose it.
+  // Not enabled on managed Neon Auth: 401 without a session, otherwise 404 with
+  // an empty body, whatever the password (checked against a real branch).
   "POST /delete-user": (req, res) => {
+    if (!sessionOf(req)) return fail(res, 401, "UNAUTHORIZED");
     res.statusCode = 404;
-    res.end("Not found");
+    res.end();
   },
 };
 
@@ -265,7 +298,8 @@ http
     // Neon Auth refuses state-changing requests from origins that aren't trusted.
     if (req.method === "POST") {
       const origin = req.headers.origin;
-      if (origin && !ALLOWED_ORIGINS.has(origin)) return fail(res, 403, "INVALID_ORIGIN");
+      if (!origin || origin === "null") return fail(res, 403, "MISSING_OR_NULL_ORIGIN");
+      if (!ALLOWED_ORIGINS.has(origin)) return fail(res, 403, "INVALID_ORIGIN");
     }
 
     const handler = routes[`${req.method} ${url.pathname.slice(BASE.length)}`];

@@ -100,3 +100,10 @@ export const STALE_AFTER_DAYS = 14;
 export function isStatus(value: unknown): value is Status {
   return typeof value === "string" && (STATUSES as readonly string[]).includes(value);
 }
+
+/**
+ * How long an emailed verification / reset code works. Measured against a real
+ * Neon Auth branch: the code's `expiresAt` is 300 s after it was created (Neon's
+ * docs say 15 minutes; the service does not). If Neon changes it, change it here.
+ */
+export const OTP_LIFETIME_MINUTES = 5;

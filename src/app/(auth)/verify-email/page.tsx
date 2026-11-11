@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { OTP_LIFETIME_MINUTES } from "@/lib/constants";
 import { ResendCodeForm, VerifyEmailForm } from "@/components/verify-forms";
 
 export const metadata: Metadata = { title: "Verify your email" };
@@ -16,7 +17,7 @@ export default async function VerifyEmailPage({
         {email ? (
           <>
             We sent a 6-digit code to <strong className="text-zinc-700">{email}</strong>.
-            Enter it to finish creating your account. It&apos;s valid for 15 minutes.
+            Enter it to finish creating your account. It&apos;s valid for {OTP_LIFETIME_MINUTES} minutes.
           </>
         ) : (
           "Enter your email and the 6-digit code we sent you."

@@ -6,8 +6,9 @@
 // What it does, in order (all over Neon Auth's HTTP API, the same endpoints
 // the app's SDK calls):
 //   1. POST /sign-in/email: if the account already works, it stops there.
-//      A 403 EMAIL_NOT_VERIFIED means the account exists but is unverified
-//      (Neon Auth has just emailed a fresh code).
+//      A 403 EMAIL_NOT_VERIFIED means the account exists but is unverified.
+//      Neon Auth sends NO code on sign-in (checked against a real branch), so
+//      the script asks for one with POST /email-otp/send-verification-otp.
 //   2. Otherwise POST /sign-up/email. Neon Auth answers the same for a new and
 //      an already-registered address, so this cannot tell you which it was.
 //   3. POST /email-otp/verify-email with the 6-digit code from the inbox
@@ -165,8 +166,7 @@ async function verify(code) {
 
 // ---- main -----------------------------------------------------------------
 
-// A code was passed in: verify directly. Signing in first would make Neon Auth
-// email a new code and could invalidate the one being used.
+// A code was passed in: verify directly (no sign-in first: it is not needed).
 if (flag("code")) {
   await verify(flag("code").trim());
   process.exit(0);
@@ -180,7 +180,10 @@ if (signIn.status === 200) {
 
 let needsCode = false;
 if (signIn.status === 403 && signIn.json?.code === "EMAIL_NOT_VERIFIED") {
-  console.log(`Test account ${masked} exists but isn't verified; Neon Auth has emailed a new code.`);
+  // Signing in does not email a code; ask for one (codes live about 5 minutes).
+  const sent = await call("/email-otp/send-verification-otp", { email, type: "email-verification" });
+  if (sent.status !== 200) die(`Could not request a new code: ${describe(sent)}`);
+  console.log(`Test account ${masked} exists but isn't verified; asked Neon Auth to email a new code.`);
   needsCode = true;
 } else if (signIn.status === 401 || signIn.status === 400) {
   // Unknown address and wrong password look the same here, so try to sign up.
@@ -205,7 +208,7 @@ if (needsCode) {
     console.log(
       "\nNext step: read the code from that inbox, then run:\n" +
         `  node --env-file=.env scripts/create-test-account.mjs --allow-host ${base.host} --code <code>\n` +
-        "(Codes are short-lived; if it has expired, run the script again without --code for a fresh one.)",
+        "(Codes expire after about 5 minutes; if it has, run the script again without --code for a fresh one.)",
     );
   }
 }

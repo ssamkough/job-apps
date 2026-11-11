@@ -143,9 +143,13 @@ test.describe("desktop journey", () => {
     await expect(page).toHaveURL(/\/login$/);
   });
 
-  test("signing in before verifying leads back to the code screen", async () => {
+  test("signing in before verifying leads back to the code screen, with a fresh code", async () => {
+    const signupCode = await codeFor(email, "email-verification");
     await signIn(page, email, PASSWORD);
     await expect(page).toHaveURL(/\/verify-email\?email=/);
+    // Neon Auth sends nothing on sign-in (checked live) and its codes live only
+    // 5 minutes, so the app asks for a new one; the sign-up code is now replaced.
+    await expect.poll(() => codeFor(email, "email-verification")).not.toBe(signupCode);
     const cookies = await page.context().cookies();
     expect(cookies.filter((c) => c.name.startsWith("__Secure-neon-auth"))).toEqual([]);
   });
@@ -466,6 +470,7 @@ test.describe("desktop journey", () => {
     await expireSessionCache(other);
     await otherPage.goto("/dashboard");
     await expect(otherPage).toHaveURL(/\/login/);
+    await expect(otherPage.getByRole("button", { name: "Sign in" })).toBeVisible();
     await other.close();
 
     // Old password fails, new one works.
@@ -505,6 +510,7 @@ test.describe("desktop journey", () => {
     await expireSessionCache(other);
     await otherPage.goto("/dashboard");
     await expect(otherPage).toHaveURL(/\/login/);
+    await expect(otherPage.getByRole("button", { name: "Sign in" })).toBeVisible();
     await other.close();
   });
 
@@ -530,6 +536,7 @@ test.describe("desktop journey", () => {
     await expireSessionCache(other);
     await otherPage.goto("/dashboard");
     await expect(otherPage).toHaveURL(/\/login/);
+    await expect(otherPage.getByRole("button", { name: "Sign in" })).toBeVisible();
     await other.close();
 
     await signIn(page, email, "e2e-password-3");
@@ -602,6 +609,43 @@ test.describe("auth provider problems", () => {
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/dashboard/);
+  });
+
+  test("a browser holding a revoked session cookie still reaches every page and can sign in again", async ({ page, browser }) => {
+    // Seen on a real Neon branch: for a revoked token, get-session answers null AND
+    // Set-Cookie headers the SDK can't apply while a page renders. That used to make
+    // "/", "/login", "/signup" and the whole app answer 500 until the cookie expired.
+    const email = uniqueEmail("stale");
+    await signUp(page, email);
+    await verifyEmail(page, email);
+
+    const other = await browser.newContext({ extraHTTPHeaders: ip("10.0.0.2") });
+    const stale = await other.newPage();
+    await signIn(stale, email, PASSWORD);
+    await expect(stale).toHaveURL(/\/dashboard/);
+
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Sign out of all devices" }).click();
+    await expect(page).toHaveURL(/\/login/);
+    await expireSessionCache(other); // the revoked session_token cookie is all that's left
+
+    for (const [path, heading] of [
+      ["/", /Keep your whole job search organized/],
+      ["/login", /Welcome back/],
+      ["/signup", /Create your account/],
+      ["/dashboard", /Welcome back/], // bounced to /login
+      ["/settings", /Welcome back/],
+    ] as const) {
+      const res = await stale.goto(path);
+      expect(res!.status(), path).toBe(200);
+      await expect(stale.getByText(heading).first(), path).toBeVisible();
+    }
+    expect((await stale.request.get("/api/resumes/whatever")).status()).toBe(401);
+
+    // And signing in replaces the dead cookie.
+    await signIn(stale, email, PASSWORD);
+    await expect(stale).toHaveURL(/\/dashboard/);
+    await other.close();
   });
 
   test("signing up twice with one address looks the same as the first time", async ({ page }) => {

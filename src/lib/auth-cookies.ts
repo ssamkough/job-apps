@@ -1,11 +1,24 @@
 import "server-only";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 
 /** Every cookie the Neon Auth SDK sets starts with this (`session_token`, `local.session_data`). */
 export const AUTH_COOKIE_PREFIX = "__Secure-neon-auth";
 
+export const SESSION_TOKEN_COOKIE = `${AUTH_COOKIE_PREFIX}.session_token`;
+
 export async function hasAuthCookie() {
   return (await cookies()).getAll().some((c) => c.name.startsWith(AUTH_COOKIE_PREFIX));
+}
+
+/**
+ * The browser's session-token cookie exactly as sent (`name=value`, still
+ * encoded), or null. Read from the raw header because `cookies()` hands back
+ * decoded values that can't be forwarded as they are.
+ */
+export async function sessionTokenCookieHeader(): Promise<string | null> {
+  const raw = (await headers()).get("cookie") ?? "";
+  const part = raw.split(";").map((p) => p.trim()).find((p) => p.startsWith(`${SESSION_TOKEN_COOKIE}=`));
+  return part ?? null;
 }
 
 /**

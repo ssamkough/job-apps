@@ -96,7 +96,7 @@ npx playwright install chromium
   and `e2e/mock-services.mjs` (a mock Ollama). The mock exposes the emailed
   codes to the tests, so sign-up, verification and password reset run offline.
   It is a model, not the real service: the real Neon Auth is only covered by the
-  manual smoke test in [DEPLOYMENT.md](./DEPLOYMENT.md).
+  manual smoke test in [DEPLOYMENT.md](./DEPLOYMENT.md#go-live).
 - Run `E2E_AI=false npm run test:e2e` to test the no-AI launch configuration
   (the AI specs skip; a check that the AI UI is gone runs instead). It also
   writes mobile screenshots to `e2e/screenshots/`.
@@ -119,6 +119,8 @@ npx playwright install chromium
 | `src/lib/features.ts` | Feature flags (`AI_ENABLED`) |
 | `src/lib/storage.ts` | Resume storage (local disk or S3-compatible) and upload validation |
 | `src/lib/validation.ts`, `constants.ts` | Form schemas; limits such as the 4 MB resume cap |
+| `src/lib/file-type.ts`, `resume-text.ts` | Resume type sniffing from file bytes; text extraction (PDF, DOCX) for AI drafts |
+| `src/lib/insights.ts`, `format.ts`, `form-state.ts`, `site.ts`, `db.ts` | Dashboard insights; date/size formatting; shared form-state type; site name and `SUPPORT_EMAIL`; the Prisma client |
 | `src/test/` | Test helpers: in-memory fake auth, DB helpers, file fixtures |
 | `e2e/` | Playwright specs and the offline mocks (`mock-neon-auth.mjs`, `mock-services.mjs`) |
 | `prisma/` | Schema and migrations (app tables only; Neon Auth owns the `neon_auth` schema) |
@@ -133,6 +135,10 @@ mention AI. Production launches with it unset.
 
 ## Deploying
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md): the Vercel + Neon launch runbook,
-free-tier limits (verified Nov 2026), a go-live checklist, and known
-limitations.
+See [DEPLOYMENT.md](./DEPLOYMENT.md): the Vercel Hobby + Neon (Postgres, Auth,
+Object Storage) runbook, with the
+[free-tier limits](./DEPLOYMENT.md#free-tier-limits) (checked Nov 2026), the
+[environment variable table](./DEPLOYMENT.md#environment-variables), the
+[go-live steps and smoke test](./DEPLOYMENT.md#go-live),
+[operations](./DEPLOYMENT.md#operations) (monitor, backups, rotating secrets)
+and [known limitations](./DEPLOYMENT.md#known-limitations).

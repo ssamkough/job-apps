@@ -15,6 +15,7 @@ import {
   verifyEmailSchema,
 } from "@/lib/validation";
 import { formValues, type FormState } from "@/lib/form-state";
+import { OTP_LIFETIME_MINUTES } from "@/lib/constants";
 import {
   RULES,
   clear,
@@ -100,8 +101,17 @@ export async function login(
   if (error) {
     // Neon Auth only reports this once the password was right, so it doesn't
     // reveal anything to someone who doesn't already have the password. It
-    // has just emailed a fresh code.
-    if (error.code === "EMAIL_NOT_VERIFIED") redirect(verifyUrl(email));
+    // sends NO code on sign-in (checked against a real branch), and the code
+    // from sign-up lives only a few minutes, so send a fresh one under the same
+    // caps as every other form that triggers an email. If that can't be done
+    // the verify screen still offers "send a new code".
+    if (error.code === "EMAIL_NOT_VERIFIED") {
+      if (!(await otpSendAllowed(email))) {
+        const sent = await authApi().sendOtp({ email, type: "email-verification" });
+        if (sent.error) unexpectedAuthError("login-send-code", sent.error);
+      }
+      redirect(verifyUrl(email));
+    }
 
     // Same answer for an unknown email and a wrong password.
     if (error.code === "INVALID_CREDENTIALS") {
@@ -122,8 +132,7 @@ export async function logout() {
   redirect("/login");
 }
 
-const CODE_NOTICE =
-  "If that address is waiting for verification, we've emailed a new code. It's valid for 15 minutes.";
+const CODE_NOTICE = `If that address is waiting for verification, we've emailed a new code. It's valid for ${OTP_LIFETIME_MINUTES} minutes.`;
 
 /** Finishes sign-up: the emailed code proves the address, then signs the user in. */
 export async function verifyEmail(
