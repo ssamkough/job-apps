@@ -22,7 +22,8 @@ const features = (ai: boolean) => [
 ];
 
 export default async function Home() {
-  if (await getCurrentUser()) redirect("/dashboard");
+  const user = await getCurrentUser();
+  if (user?.emailVerified) redirect("/dashboard");
 
   return (
     <div className="flex flex-1 flex-col">

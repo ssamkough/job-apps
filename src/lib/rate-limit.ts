@@ -18,10 +18,13 @@ export const RULES = {
   // Only failed attempts count toward this one.
   loginEmailFailures: { limit: 10, windowSec: 15 * 60 },
   signupIp: { limit: 5, windowSec: 60 * 60 },
-  resetIp: { limit: 10, windowSec: 60 * 60 },
-  resetEmail: { limit: 3, windowSec: 60 * 60 },
-  resetSubmitIp: { limit: 10, windowSec: 60 * 60 },
-  verifyResendUser: { limit: 3, windowSec: 60 * 60 },
+  // Every email we ask Neon Auth to send (signup, resend code, forgot password)
+  // counts here, so our forms can't be used to flood someone's inbox.
+  otpSendIp: { limit: 15, windowSec: 60 * 60 },
+  otpSendEmail: { limit: 4, windowSec: 60 * 60 },
+  // Guessing a code: Neon Auth also caps attempts per code.
+  otpSubmitIp: { limit: 20, windowSec: 15 * 60 },
+  otpSubmitEmail: { limit: 10, windowSec: 15 * 60 },
   // Guessing the current password from inside a logged-in session.
   passwordCheckUser: { limit: 10, windowSec: 15 * 60 },
   aiUser: { limit: 15, windowSec: 60 * 60 },

@@ -1,34 +1,22 @@
 "use client";
 
-import { useActionState, useTransition, useState } from "react";
-import { changePassword, deleteAccount, resendVerification } from "@/app/actions/account";
+import { useActionState } from "react";
+import { changePassword, deleteAccount, signOutEverywhere } from "@/app/actions/account";
 import type { FormState } from "@/lib/form-state";
-import { Button, Field, Notice, inputClass } from "@/components/ui";
+import { Field, Notice, inputClass } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 
 const initial: FormState = {};
 
-export function ResendVerificationButton({ variant = "secondary" }: { variant?: "secondary" | "ghost" }) {
-  const [pending, start] = useTransition();
-  const [result, setResult] = useState<FormState | null>(null);
+export function SignOutEverywhereForm() {
+  const [state, action] = useActionState(signOutEverywhere, initial);
   return (
-    <span className="inline-flex flex-wrap items-center gap-3">
-      <Button
-        variant={variant}
-        disabled={pending}
-        onClick={() => start(async () => setResult(await resendVerification()))}
-      >
-        {pending ? "Sending…" : "Resend verification email"}
-      </Button>
-      {result?.message && (
-        <span
-          role={result.ok ? "status" : "alert"}
-          className={result.ok ? "text-sm text-emerald-700" : "text-sm text-rose-700"}
-        >
-          {result.message}
-        </span>
-      )}
-    </span>
+    <form action={action} className="space-y-3">
+      {state.message && <Notice tone="error">{state.message}</Notice>}
+      <SubmitButton variant="secondary" pendingText="Signing out…">
+        Sign out of all devices
+      </SubmitButton>
+    </form>
   );
 }
 

@@ -19,7 +19,7 @@ export default defineConfig({
     { name: "mobile", use: { ...devices["iPhone 13"], browserName: "chromium" }, grep: /@mobile/ },
   ],
   webServer: [
-    { command: "node e2e/mock-services.mjs", url: "http://127.0.0.1:11501/mails", reuseExistingServer: false },
+    { command: "node e2e/mock-services.mjs", url: "http://127.0.0.1:11501/chats", reuseExistingServer: false },
     {
       command: `node scripts/prepare-e2e.mjs && npx next start -p ${PORT}`,
       url: `http://localhost:${PORT}/api/health`,
@@ -30,18 +30,15 @@ export default defineConfig({
       env: {
         DATABASE_URL: E2E_DB,
         DIRECT_URL: E2E_DB,
-        APP_URL: `http://localhost:${PORT}`,
         STORAGE_DRIVER: "local",
         UPLOAD_DIR: "./data/e2e-uploads",
         // E2E_AI=false exercises the no-AI launch configuration.
         AI_ENABLED: process.env.E2E_AI === "false" ? "false" : "true",
         OLLAMA_BASE_URL: "http://127.0.0.1:11500",
         OLLAMA_MODEL: "mock",
-        SMTP_HOST: "127.0.0.1",
-        SMTP_PORT: "2526",
-        SMTP_SECURE: "false",
-        EMAIL_FROM: "Job Tracker <noreply@example.test>",
-        EMAIL_DAILY_LIMIT: "500",
+        // The app talks to an in-process stand-in for Neon Auth (e2e/mock-neon-auth.mjs).
+        NEON_AUTH_BASE_URL: "http://127.0.0.1:11502/neondb/auth",
+        NEON_AUTH_COOKIE_SECRET: "e2e-only-cookie-secret-at-least-32-characters-long",
         SUPPORT_EMAIL: "help@example.test",
       },
     },

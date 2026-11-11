@@ -11,46 +11,23 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// Slim app-side mirror of a Neon Auth user. Credentials, email, name and
+// sessions all live in Neon Auth (the `neon_auth` schema); this table exists so
+// Application/Resume rows have something to reference and cascade from.
+// `id` IS the Neon Auth user id (a uuid, kept as text). Rows are created lazily
+// on a user's first authenticated request (see src/lib/auth.ts). There is
+// deliberately no foreign key into `neon_auth.*`: that schema belongs to Neon.
+// Slim app-side mirror of a Neon Auth user. Credentials, email, name and
+// sessions all live in Neon Auth (the `neon_auth` schema); this table exists so
+// Application/Resume rows have something to reference and cascade from.
+// `id` IS the Neon Auth user id (a uuid, kept as text). Rows are created lazily
+// on a user's first authenticated request (see src/lib/auth.ts). There is
+// deliberately no foreign key into `neon_auth.*`: that schema belongs to Neon.
 model User {
-  id              String        @id @default(cuid())
-  email           String        @unique
-  name            String?
-  passwordHash    String
-  // Null until the user clicks the link we email them. Gates AI features.
-  emailVerifiedAt DateTime?
-  createdAt       DateTime      @default(now())
-  sessions        Session[]
-  tokens          AuthToken[]
-  applications    Application[]
-  resumes         Resume[]
-}
-
-model Session {
-  id        String   @id @default(cuid())
-  // SHA-256 of the cookie token. The raw token only ever lives in the cookie.
-  tokenHash String   @unique
-  userId    String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
-// One-time tokens for password reset and email verification. Only the SHA-256
-// of the token is stored; the raw token only exists in the emailed link.
-model AuthToken {
-  id        String    @id @default(cuid())
-  userId    String
-  // PASSWORD_RESET | EMAIL_VERIFY
-  type      String
-  tokenHash String    @unique
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, type])
+  id           String        @id
+  createdAt    DateTime      @default(now())
+  applications Application[]
+  resumes      Resume[]
 }
 
 // Fixed-window counters for rate limiting, kept in Postgres so no Redis is

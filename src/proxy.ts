@@ -1,15 +1,23 @@
-import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getNeonAuth } from "@/lib/neon-auth";
 
-// Optimistic check only: it looks for the cookie, not whether the session is
-// valid. Real verification happens in requireUser() next to the data.
+type Handler = ReturnType<ReturnType<typeof getNeonAuth>["middleware"]>;
+let handler: Handler | undefined;
+
+/**
+ * Redirects signed-out visitors to /login and keeps the SDK's signed session
+ * cache cookie fresh (it can only be refreshed here and in server actions, not
+ * while rendering a page). Pages and actions still check the user themselves
+ * (`requireUser`): a proxy is a convenience, not the security boundary, and
+ * Server Actions are POSTs to the page URL that must be checked individually.
+ *
+ * The SDK answers from its signed cookie while it is fresh (60 s) and asks
+ * Neon Auth when it isn't.
+ * https://neon.com/docs/auth/reference/nextjs-server.md
+ */
 export function proxy(request: NextRequest) {
-  const hasSession = request.cookies.has("session");
-  if (!hasSession) {
-    const url = new URL("/login", request.url);
-    return NextResponse.redirect(url);
-  }
-  return NextResponse.next();
+  handler ??= getNeonAuth().middleware({ loginUrl: "/login" });
+  return handler(request);
 }
 
 export const config = {

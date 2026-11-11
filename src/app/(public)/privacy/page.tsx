@@ -27,7 +27,7 @@ export default function PrivacyPage() {
 
       <Section title="What we store">
         <ul className="list-disc space-y-1 pl-5">
-          <li>Your account: email address, optional name, and a salted hash of your password (never the password itself).</li>
+          <li>Your account: email address, optional name, and a salted hash of your password (never the password itself). These are held by our sign-in provider (Neon Auth).</li>
           <li>What you add: applications, notes, contacts, status history, job descriptions, cover letters, and the resume files you upload.</li>
           <li>A session cookie that keeps you signed in. We don&apos;t use advertising or analytics cookies.</li>
           <li>Short-lived technical records used to limit abuse, such as how many times an IP address or email tried to sign in.</li>
@@ -45,7 +45,7 @@ export default function PrivacyPage() {
       <Section title="Who else handles your data">
         <ul className="list-disc space-y-1 pl-5">
           <li>Our hosting, database and file-storage providers store the data above on our behalf.</li>
-          <li>Our email provider delivers account emails (verification and password reset) to your address.</li>
+          <li>Our sign-in provider (Neon Auth) emails you the 6-digit codes used to verify your address and reset your password.</li>
         </ul>
         We don&apos;t sell your data or share it for marketing.
       </Section>
@@ -53,7 +53,7 @@ export default function PrivacyPage() {
       <Section title="Your choices">
         <ul className="list-disc space-y-1 pl-5">
           <li>Edit or delete any application or resume at any time.</li>
-          <li>Delete your account from Settings. This permanently removes your account, applications, and uploaded resumes.</li>
+          <li>Delete your account from Settings. This permanently removes your applications and uploaded resumes and ends all sessions. Your sign-in details (email address, name and password hash) stay with our sign-in provider until they are removed; email us and we will have them deleted.</li>
           <li>Sign out of all devices from Settings.</li>
         </ul>
       </Section>

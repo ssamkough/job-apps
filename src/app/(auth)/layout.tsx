@@ -8,7 +8,10 @@ export default async function AuthLayout({
 }: {
   children: React.ReactNode;
 }) {
-  if (await getCurrentUser()) redirect("/dashboard");
+  // Only verified users are bounced: an unverified one with a session would
+  // otherwise loop between here and the app's verify redirect.
+  const user = await getCurrentUser();
+  if (user?.emailVerified) redirect("/dashboard");
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center px-4 py-12">

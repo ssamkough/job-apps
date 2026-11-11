@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { applicationSchema, fieldErrors, loginSchema, signupSchema } from "@/lib/validation";
+import {
+  applicationSchema,
+  fieldErrors,
+  loginSchema,
+  otpSchema,
+  resetPasswordSchema,
+  signupSchema,
+  verifyEmailSchema,
+} from "@/lib/validation";
 
 describe("signupSchema", () => {
   it("normalizes email and treats a blank name as absent", () => {
@@ -68,5 +76,26 @@ describe("applicationSchema", () => {
     const errs = fieldErrors(r.error);
     expect(errs.company).toBe("Company is required");
     expect(errs.jobUrl).toMatch(/http/);
+  });
+});
+
+describe("one-time codes", () => {
+  it("accepts exactly six digits (trimmed)", () => {
+    expect(otpSchema.parse(" 123456 ")).toBe("123456");
+  });
+
+  it("rejects anything else", () => {
+    for (const bad of ["", "12345", "1234567", "12345a", "12 345", "１２３４５６"]) {
+      expect(otpSchema.safeParse(bad).success, bad).toBe(false);
+    }
+  });
+
+  it("verify and reset forms normalize the email and require a code", () => {
+    expect(verifyEmailSchema.parse({ email: " A@B.co ", code: "123456" }).email).toBe("a@b.co");
+    expect(verifyEmailSchema.safeParse({ email: "a@b.co", code: "" }).success).toBe(false);
+    const reset = { email: "a@b.co", code: "123456", password: "longenough", confirm: "longenough" };
+    expect(resetPasswordSchema.safeParse(reset).success).toBe(true);
+    expect(resetPasswordSchema.safeParse({ ...reset, confirm: "other-thing" }).success).toBe(false);
+    expect(resetPasswordSchema.safeParse({ ...reset, code: "abc" }).success).toBe(false);
   });
 });

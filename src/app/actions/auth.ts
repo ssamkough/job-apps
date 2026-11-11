@@ -2,21 +2,17 @@
 
 import { redirect } from "next/navigation";
 import { after } from "next/server";
-import { Prisma } from "@prisma/client";
-import { db } from "@/lib/db";
-import {
-  createSession,
-  deleteUserSessions,
-  destroySession,
-  hashPassword,
-  verifyPassword,
-} from "@/lib/auth";
+import { authApi } from "@/lib/auth-api";
+import { clearAuthCookies } from "@/lib/auth-cookies";
+import { unexpectedAuthError } from "@/lib/auth-errors";
 import {
   fieldErrors,
   forgotPasswordSchema,
   loginSchema,
+  resendCodeSchema,
   resetPasswordSchema,
   signupSchema,
+  verifyEmailSchema,
 } from "@/lib/validation";
 import { formValues, type FormState } from "@/lib/form-state";
 import {
@@ -28,9 +24,24 @@ import {
   peek,
   retryMessage,
 } from "@/lib/rate-limit";
-import { consumeToken } from "@/lib/tokens";
-import { emailQuotaAvailable } from "@/lib/email";
-import { sendPasswordResetEmail, sendVerificationEmail } from "@/lib/auth-emails";
+
+/**
+ * Everything here talks to Neon Auth through `authApi()`. Neon Auth is a public
+ * endpoint with its own (undocumented) rate limits; the limits below protect
+ * *our* forms and keep them from being used to flood inboxes or guess codes.
+ * https://neon.com/docs/auth/reference/nextjs-server.md
+ */
+
+const verifyUrl = (email: string) => `/verify-email?email=${encodeURIComponent(email)}`;
+
+/** Counts one "send an email" against the shared per-IP and per-address caps. */
+async function otpSendAllowed(email: string): Promise<FormState | null> {
+  const byIp = await hit(`otp-send:ip:${await clientIp()}`, RULES.otpSendIp);
+  if (!byIp.allowed) return { message: retryMessage(byIp) };
+  const byEmail = await hit(`otp-send:email:${emailKey(email)}`, RULES.otpSendEmail);
+  if (!byEmail.allowed) return { message: retryMessage(byEmail) };
+  return null;
+}
 
 export async function signup(
   _prev: FormState,
@@ -45,36 +56,23 @@ export async function signup(
 
   const limit = await hit(`signup:ip:${await clientIp()}`, RULES.signupIp);
   if (!limit.allowed) return { message: retryMessage(limit), values };
+  const blocked = await otpSendAllowed(parsed.data.email);
+  if (blocked) return { ...blocked, values };
 
   const { name, email, password } = parsed.data;
+  const { error } = await authApi().signUp({ email, password, name: name ?? "" });
 
-  const existing = await db.user.findUnique({ where: { email } });
-  if (existing) {
-    return {
-      errors: { email: "An account with this email already exists" },
-      values,
-    };
-  }
-
-  let user: { id: string; email: string };
-  try {
-    user = await db.user.create({
-      data: { name, email, passwordHash: await hashPassword(password) },
-      select: { id: true, email: true },
-    });
-  } catch (e) {
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      return {
-        errors: { email: "An account with this email already exists" },
-        values,
-      };
+  // For an address that is already registered Neon Auth answers exactly as it
+  // does for a new one, so sign-up can't be used to find out who has an
+  // account. We keep that property: both cases continue to the code screen.
+  if (error && error.code !== "USER_ALREADY_EXISTS") {
+    if (error.code === "WEAK_PASSWORD") {
+      return { errors: { password: "Choose a password of 8 to 128 characters" }, values };
     }
-    throw e;
+    return { message: unexpectedAuthError("signup", error), values };
   }
 
-  await createSession(user.id);
-  after(() => sendVerificationEmail(user));
-  redirect("/dashboard");
+  redirect(verifyUrl(email));
 }
 
 export async function login(
@@ -97,26 +95,86 @@ export async function login(
   const failures = await peek(failKey, RULES.loginEmailFailures);
   if (!failures.allowed) return { message: retryMessage(failures), values };
 
-  const user = await db.user.findUnique({ where: { email } });
-  const ok = await verifyPassword(password, user?.passwordHash ?? null);
+  const { error } = await authApi().signIn({ email, password });
 
-  if (!user || !ok) {
-    await hit(failKey, RULES.loginEmailFailures);
-    return { message: "Incorrect email or password", values };
+  if (error) {
+    // Neon Auth only reports this once the password was right, so it doesn't
+    // reveal anything to someone who doesn't already have the password. It
+    // has just emailed a fresh code.
+    if (error.code === "EMAIL_NOT_VERIFIED") redirect(verifyUrl(email));
+
+    // Same answer for an unknown email and a wrong password.
+    if (error.code === "INVALID_CREDENTIALS") {
+      await hit(failKey, RULES.loginEmailFailures);
+      return { message: "Incorrect email or password", values };
+    }
+    return { message: unexpectedAuthError("login", error), values };
   }
 
   await clear(failKey);
-  await createSession(user.id);
   redirect("/dashboard");
 }
 
 export async function logout() {
-  await destroySession();
+  // Neon Auth may be unreachable; the browser is signed out regardless.
+  await authApi().signOut().catch(() => {});
+  await clearAuthCookies();
   redirect("/login");
 }
 
-const RESET_NOTICE =
-  "If an account exists for that email, we've sent a link to reset the password. It's valid for 1 hour.";
+const CODE_NOTICE =
+  "If that address is waiting for verification, we've emailed a new code. It's valid for 5 minutes.";
+
+/** Finishes sign-up: the emailed code proves the address, then signs the user in. */
+export async function verifyEmail(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const raw = formValues(formData);
+  const values = { email: raw.email ?? "" };
+
+  const parsed = verifyEmailSchema.safeParse(raw);
+  if (!parsed.success) return { errors: fieldErrors(parsed.error), values };
+  const { email, code } = parsed.data;
+
+  const byIp = await hit(`otp-submit:ip:${await clientIp()}`, RULES.otpSubmitIp);
+  if (!byIp.allowed) return { message: retryMessage(byIp), values };
+  const byEmail = await hit(`otp-submit:email:${emailKey(email)}`, RULES.otpSubmitEmail);
+  if (!byEmail.allowed) return { message: retryMessage(byEmail), values };
+
+  const { error } = await authApi().verifyEmail({ email, otp: code });
+  if (error) {
+    if (error.code === "INVALID_CODE") {
+      return {
+        message: "That code is wrong or has expired. Check it, or request a new one.",
+        values,
+      };
+    }
+    return { message: unexpectedAuthError("verify-email", error), values };
+  }
+
+  // The SDK stored the new session (auto sign-in after verification).
+  redirect("/dashboard?verified=1");
+}
+
+export async function resendVerificationCode(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const raw = formValues(formData);
+  const values = { email: raw.email ?? "" };
+
+  const parsed = resendCodeSchema.safeParse(raw);
+  if (!parsed.success) return { errors: fieldErrors(parsed.error), values };
+  const { email } = parsed.data;
+
+  const blocked = await otpSendAllowed(email);
+  if (blocked) return { ...blocked, values };
+
+  const { error } = await authApi().sendOtp({ email, type: "email-verification" });
+  if (error) return { message: unexpectedAuthError("resend-code", error), values };
+  return { ok: true, message: CODE_NOTICE, values };
+}
 
 export async function requestPasswordReset(
   _prev: FormState,
@@ -129,67 +187,52 @@ export async function requestPasswordReset(
   if (!parsed.success) return { errors: fieldErrors(parsed.error), values };
   const { email } = parsed.data;
 
-  const byIp = await hit(`reset:ip:${await clientIp()}`, RULES.resetIp);
-  if (!byIp.allowed) return { message: retryMessage(byIp), values };
-  const byEmail = await hit(`reset:email:${emailKey(email)}`, RULES.resetEmail);
-  if (!byEmail.allowed) return { message: retryMessage(byEmail), values };
+  const blocked = await otpSendAllowed(email);
+  if (blocked) return { ...blocked, values };
 
-  // Checked before looking the account up so a full daily quota is reported
-  // to everyone alike and can't be used to probe for registered emails.
-  if (!(await emailQuotaAvailable())) {
-    return {
-      message: "We can't send email right now. Please try again tomorrow.",
-      values,
-    };
-  }
-
-  // Look up and send *after* responding so the response time doesn't reveal
-  // whether the account exists.
+  // Send *after* responding so the response time doesn't reveal whether the
+  // account exists. Neon Auth answers the same either way; this keeps us from
+  // adding a difference of our own.
   after(async () => {
     try {
-      const user = await db.user.findUnique({ where: { email } });
-      if (user) await sendPasswordResetEmail(user);
+      const { error } = await authApi().sendOtp({ email, type: "forget-password" });
+      if (error) unexpectedAuthError("request-password-reset", error);
     } catch (e) {
-      console.error("Password reset lookup failed", e);
+      console.error("Password reset request failed", e);
     }
   });
 
-  return { ok: true, message: RESET_NOTICE };
+  redirect(`/reset-password?email=${encodeURIComponent(email)}`);
 }
 
 export async function resetPassword(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const parsed = resetPasswordSchema.safeParse(formValues(formData));
-  if (!parsed.success) {
-    const errors = fieldErrors(parsed.error);
-    // A bad token isn't a field the user can fix.
-    if (errors.token) return { message: errors.token };
-    return { errors };
+  const raw = formValues(formData);
+  const values = { email: raw.email ?? "", code: raw.code ?? "" };
+
+  const parsed = resetPasswordSchema.safeParse(raw);
+  if (!parsed.success) return { errors: fieldErrors(parsed.error), values };
+  const { email, code, password } = parsed.data;
+
+  const byIp = await hit(`otp-submit:ip:${await clientIp()}`, RULES.otpSubmitIp);
+  if (!byIp.allowed) return { message: retryMessage(byIp), values };
+  const byEmail = await hit(`otp-submit:email:${emailKey(email)}`, RULES.otpSubmitEmail);
+  if (!byEmail.allowed) return { message: retryMessage(byEmail), values };
+
+  const { error } = await authApi().resetPassword({ email, otp: code, password });
+  if (error) {
+    if (error.code === "INVALID_CODE") {
+      return { message: "That code is wrong or has expired. Request a new one.", values };
+    }
+    if (error.code === "WEAK_PASSWORD") {
+      return { errors: { password: "Choose a password of 8 to 128 characters" }, values };
+    }
+    return { message: unexpectedAuthError("reset-password", error), values };
   }
 
-  const limit = await hit(`reset-submit:ip:${await clientIp()}`, RULES.resetSubmitIp);
-  if (!limit.allowed) return { message: retryMessage(limit) };
-
-  const userId = await consumeToken(parsed.data.token, "PASSWORD_RESET");
-  if (!userId) {
-    return {
-      message: "This link is invalid or has expired. Request a new one.",
-    };
-  }
-
-  const user = await db.user.update({
-    where: { id: userId },
-    data: {
-      passwordHash: await hashPassword(parsed.data.password),
-      // Receiving the email proves they own the address.
-      emailVerifiedAt: new Date(),
-    },
-    select: { emailVerifiedAt: true, id: true },
-  });
-  // Anyone who had the old password (or a stolen session) is signed out.
-  await deleteUserSessions(user.id);
-
+  // With "revoke sessions on password reset" on (a documented Neon Auth
+  // setting) every existing session, on every device, is already ended.
   redirect("/login?reset=1");
 }

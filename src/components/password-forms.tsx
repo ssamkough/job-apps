@@ -6,6 +6,7 @@ import { requestPasswordReset, resetPassword } from "@/app/actions/auth";
 import type { FormState } from "@/lib/form-state";
 import { Field, Notice, inputClass, linkClass } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
+import { CodeField, EmailField } from "@/components/verify-forms";
 
 const initial: FormState = {};
 
@@ -31,7 +32,7 @@ export function ForgotPasswordForm() {
         />
       </Field>
       <SubmitButton className="w-full" pendingText="Sending…">
-        Send reset link
+        Send reset code
       </SubmitButton>
       <p className="text-center text-sm text-zinc-500">
         <Link href="/login" className={linkClass}>
@@ -42,21 +43,23 @@ export function ForgotPasswordForm() {
   );
 }
 
-export function ResetPasswordForm({ token }: { token: string }) {
+export function ResetPasswordForm({ email }: { email?: string }) {
   const [state, action] = useActionState(resetPassword, initial);
   const err = state.errors ?? {};
+  const address = email ?? state.values?.email;
 
   return (
     <form action={action} className="space-y-4" noValidate>
-      <input type="hidden" name="token" value={token} />
       {state.message && (
         <Notice tone="error">
           {state.message}{" "}
           <Link href="/forgot-password" className="font-medium underline">
-            Request a new link
+            Request a new code
           </Link>
         </Notice>
       )}
+      <EmailField email={address} error={err.email} />
+      <CodeField error={err.code} defaultValue={state.values?.code} />
       <Field label="New password" htmlFor="password" error={err.password} hint="At least 8 characters.">
         <input
           id="password"

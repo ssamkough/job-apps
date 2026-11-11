@@ -14,8 +14,8 @@ import { sniffResumeType } from "@/lib/file-type";
 /**
  * Resume file storage. Two drivers behind one interface:
  *   STORAGE_DRIVER=local  files on disk (dev, or a single self-hosted server)
- *   STORAGE_DRIVER=s3     any S3-compatible bucket (Cloudflare R2, Backblaze
- *                         B2, MinIO, AWS S3, ...)
+ *   STORAGE_DRIVER=s3     any S3-compatible bucket (Neon Object Storage in
+ *                         production; also MinIO, R2, B2, AWS S3, ...)
  */
 interface Driver {
   put(key: string, data: Buffer, contentType: string): Promise<void>;
@@ -44,7 +44,9 @@ function localDriver(): Driver {
       return readFile(resolveKey(key));
     },
     async remove(key) {
-      await unlink(resolveKey(key)).catch(() => {});
+      await unlink(resolveKey(key)).catch((e) => {
+        if (e?.code !== "ENOENT") throw e;
+      });
     },
   };
 }
@@ -93,9 +95,8 @@ function s3Driver(): Driver {
       return Buffer.from(await res.Body.transformToByteArray());
     },
     async remove(key) {
-      await client
-        .send(new DeleteObjectCommand({ Bucket: bucket, Key: fullKey(key) }))
-        .catch(() => {});
+      // S3 answers 204 for a key that doesn't exist, so a throw here is a real failure.
+      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: fullKey(key) }));
     },
   };
 }
@@ -177,6 +178,12 @@ export async function readResumeFile(storageKey: string) {
   return driver().get(storageKey);
 }
 
+/** Best effort: a failure is ignored (an orphaned file is harmless and private). */
 export async function deleteResumeFile(storageKey: string) {
-  return driver().remove(storageKey);
+  await driver().remove(storageKey).catch(() => {});
+}
+
+/** Throws if the file couldn't be removed. Account deletion uses this so it never claims data is gone when it isn't. */
+export async function deleteResumeFileStrict(storageKey: string) {
+  await driver().remove(storageKey);
 }

@@ -1,14 +1,11 @@
 import type { Metadata } from "next";
 import { requireUser } from "@/lib/auth";
-import { signOutEverywhere } from "@/app/actions/account";
-import { Button, Card, PageHeader } from "@/components/ui";
+import { Card, PageHeader } from "@/components/ui";
 import {
   ChangePasswordForm,
   DeleteAccountForm,
-  ResendVerificationButton,
+  SignOutEverywhereForm,
 } from "@/components/settings-forms";
-import { aiEnabled } from "@/lib/features";
-import { formatDate } from "@/lib/format";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -45,15 +42,9 @@ export default async function SettingsPage() {
             <dt className="text-zinc-500">Email</dt>
             <dd className="text-zinc-900">
               {user.email}{" "}
-              {user.emailVerifiedAt ? (
-                <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                  Verified {formatDate(user.emailVerifiedAt)}
-                </span>
-              ) : (
-                <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
-                  Not verified
-                </span>
-              )}
+              <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                Verified
+              </span>
             </dd>
             {user.name && (
               <>
@@ -62,16 +53,6 @@ export default async function SettingsPage() {
               </>
             )}
           </dl>
-          {!user.emailVerifiedAt && (
-            <div className="mt-4">
-              <p className="mb-3 text-sm text-zinc-600">
-                {aiEnabled()
-                  ? "Verify your email to use AI cover letter drafts and to make sure you can recover your account."
-                  : "Verify your email to make sure you can recover your account."}
-              </p>
-              <ResendVerificationButton />
-            </div>
-          )}
         </Section>
 
         <Section title="Change password" description="Other devices will be signed out.">
@@ -79,15 +60,13 @@ export default async function SettingsPage() {
         </Section>
 
         <Section title="Sessions" description="Sign out everywhere, including this device.">
-          <form action={signOutEverywhere}>
-            <Button type="submit" variant="secondary">Sign out of all devices</Button>
-          </form>
+          <SignOutEverywhereForm />
         </Section>
 
         <Section
           tone="danger"
           title="Delete account"
-          description="Permanently deletes your account, applications, and uploaded resumes."
+          description="Permanently deletes your applications and uploaded resumes, and ends all sessions. Your sign-in details (email and password hash) are held by our sign-in provider and removed on request. See the privacy page."
         >
           <DeleteAccountForm />
         </Section>

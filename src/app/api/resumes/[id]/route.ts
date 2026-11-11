@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await getCurrentUser();
-  if (!user) return new Response("Unauthorized", { status: 401 });
+  if (!user?.emailVerified) return new Response("Unauthorized", { status: 401 });
 
   const { id } = await params;
   // Scoped by userId: other users' ids look identical to missing ones.

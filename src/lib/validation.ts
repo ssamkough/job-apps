@@ -25,9 +25,20 @@ export const signupSchema = z.object({
 
 export const forgotPasswordSchema = z.object({ email: emailSchema });
 
+/** The 6-digit one-time code Neon Auth emails. */
+export const otpSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{6}$/, "Enter the 6-digit code from the email");
+
+export const verifyEmailSchema = z.object({ email: emailSchema, code: otpSchema });
+
+export const resendCodeSchema = z.object({ email: emailSchema });
+
 export const resetPasswordSchema = z
   .object({
-    token: z.string().min(1, "This link is invalid or has expired."),
+    email: emailSchema,
+    code: otpSchema,
     password: passwordSchema,
     confirm: z.string(),
   })

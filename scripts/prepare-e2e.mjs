@@ -15,7 +15,7 @@ execSync("npx prisma migrate deploy", { stdio: "inherit", env: process.env });
 const db = new PrismaClient();
 try {
   await db.$executeRawUnsafe(
-    `TRUNCATE "StatusEvent", "Application", "Resume", "AuthToken", "Session", "RateLimit", "User" RESTART IDENTITY CASCADE`,
+    `TRUNCATE "StatusEvent", "Application", "Resume", "RateLimit", "User" RESTART IDENTITY CASCADE`,
   );
 } finally {
   await db.$disconnect();

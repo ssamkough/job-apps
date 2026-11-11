@@ -1,27 +1,34 @@
 import { expect, request, test, type Page } from "@playwright/test";
 import { makeDocx, makePdf } from "../src/test/files";
 
-const MAIL = "http://127.0.0.1:11501";
+const MOCKS = "http://127.0.0.1:11501"; // Ollama stand-in's request log
+const AUTH_MOCK = "http://127.0.0.1:11502"; // Neon Auth stand-in's test hooks
 const PASSWORD = "e2e-password-1";
 const NEW_PASSWORD = "e2e-password-2";
 // Matches playwright.config.ts: E2E_AI=false runs the no-AI launch configuration.
 const AI = process.env.E2E_AI !== "false";
 
-type Mail = { to: string; subject: string; text: string };
 const stamp = Date.now();
 let counter = 0;
 const uniqueEmail = (tag: string) => `${tag}-${stamp}-${counter++}@example.test`;
 
-async function mailsFor(email: string, expected = 1): Promise<Mail[]> {
+type CodeType = "email-verification" | "forget-password";
+/** The 6-digit code Neon Auth would have emailed (the stand-in exposes it). */
+async function codeFor(email: string, type: CodeType): Promise<string> {
   for (let i = 0; i < 40; i++) {
-    const res = await fetch(`${MAIL}/mails?to=${encodeURIComponent(email)}`);
-    const mails = (await res.json()) as Mail[];
-    if (mails.length >= expected) return mails;
+    const res = await fetch(`${AUTH_MOCK}/__otp?email=${encodeURIComponent(email)}&type=${type}`);
+    if (res.ok) return ((await res.json()) as { code: string }).code;
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error(`No ${expected} email(s) arrived for ${email}`);
+  throw new Error(`No ${type} code was issued for ${email}`);
 }
-const linkIn = (mail: Mail) => new URL(mail.text.match(/https?:\/\/\S+/)![0]);
+/**
+ * Our rate limits are per client IP. Without a proxy in front, every browser
+ * here would be "unknown", and the suite would trip its own limits, so each
+ * group of tests presents a different address (the app trusts x-forwarded-for).
+ */
+const ip = (address: string) => ({ "x-forwarded-for": address });
+const wrongCode = (code: string) => (code === "000000" ? "111111" : "000000");
 
 /** Collects things that should never happen in a healthy page. */
 function watch(page: Page) {
@@ -33,21 +40,28 @@ function watch(page: Page) {
   return problems;
 }
 
+/** Fills the signup form; ends on the "enter your code" screen. */
 async function signUp(page: Page, email: string, name = "Eve Tester") {
   await page.goto("/signup");
   await page.getByLabel("Name (optional)").fill(name);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(/\/verify-email\?email=/);
+}
+
+/** Enters the emailed code on the verify screen; ends signed in on the dashboard. */
+async function verifyEmail(page: Page, email: string) {
+  await page.getByLabel("6-digit code").fill(await codeFor(email, "email-verification"));
+  await page.getByRole("button", { name: "Verify email" }).click();
   await expect(page).toHaveURL(/\/dashboard/);
 }
 
-async function verifyEmail(page: Page, email: string) {
-  const [mail] = await mailsFor(email);
-  const link = linkIn(mail);
-  await page.goto(link.pathname + link.search);
-  await page.getByRole("button", { name: "Confirm my email" }).click();
-  await expect(page).toHaveURL(/\/dashboard/);
+async function signIn(page: Page, email: string, password: string) {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in" }).click();
 }
 
 async function addApplication(
@@ -71,7 +85,7 @@ test.describe("desktop journey", () => {
   let problems: string[];
 
   test.beforeAll(async ({ browser }) => {
-    page = await (await browser.newContext({ viewport: { width: 1360, height: 860 } })).newPage();
+    page = await (await browser.newContext({ viewport: { width: 1360, height: 860 }, extraHTTPHeaders: ip("10.0.0.1") })).newPage();
     problems = watch(page);
   });
   test.afterAll(async () => {
@@ -107,15 +121,68 @@ test.describe("desktop journey", () => {
     expect((await page.request.get("/api/resumes/whatever")).status()).toBe(401);
   });
 
-  test("signup validation and success", async () => {
+  test("signup validation, then the verify screen", async () => {
     await page.goto("/signup");
     await page.getByRole("button", { name: "Create account" }).click();
     await expect(page.getByText(/email/i).first()).toBeVisible();
     await expect(page).toHaveURL(/\/signup/);
 
     await signUp(page, email);
+    await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+    await expect(page.getByText(email)).toBeVisible();
+
+    // No account yet: the app stays closed until the address is verified.
+    await page.goto("/dashboard");
+    await expect(page).toHaveURL(/\/login$/);
+  });
+
+  test("signing in before verifying leads back to the code screen", async () => {
+    await signIn(page, email, PASSWORD);
+    await expect(page).toHaveURL(/\/verify-email\?email=/);
+    const cookies = await page.context().cookies();
+    expect(cookies.filter((c) => c.name.startsWith("__Secure-neon-auth"))).toEqual([]);
+  });
+
+  test("the emailed code verifies the account: wrong codes fail, a new code replaces the old", async () => {
+    const first = await codeFor(email, "email-verification");
+
+    await page.getByLabel("6-digit code").fill("12ab56");
+    await page.getByRole("button", { name: "Verify email" }).click();
+    await expect(page.getByText("Enter the 6-digit code from the email")).toBeVisible();
+
+    await page.getByLabel("6-digit code").fill(wrongCode(first));
+    await page.getByRole("button", { name: "Verify email" }).click();
+    await expect(page.getByText(/wrong or has expired/)).toBeVisible();
+    await expect(page).toHaveURL(/\/verify-email/);
+
+    await page.getByRole("button", { name: "send a new code" }).click();
+    await expect(page.getByText(/we've emailed a new code/)).toBeVisible();
+    const second = await codeFor(email, "email-verification");
+    expect(second).not.toBe(first);
+
+    await page.getByLabel("6-digit code").fill(second);
+    await page.getByRole("button", { name: "Verify email" }).click();
+    await expect(page).toHaveURL(/\/dashboard\?verified=1/);
     await expect(page.getByRole("heading", { name: "Welcome, Eve" })).toBeVisible();
-    await expect(page.getByText("Verify your email.")).toBeVisible();
+  });
+
+  test("session cookies are HttpOnly, Secure and SameSite=Lax", async () => {
+    const auth = (await page.context().cookies()).filter((c) => c.name.startsWith("__Secure-neon-auth"));
+    expect(auth.map((c) => c.name).sort()).toEqual([
+      "__Secure-neon-auth.local.session_data",
+      "__Secure-neon-auth.session_token",
+    ]);
+    for (const c of auth) {
+      expect(c.httpOnly, c.name).toBe(true);
+      expect(c.secure, c.name).toBe(true);
+      expect(c.sameSite, c.name).toBe("Lax");
+    }
+  });
+
+  test("the app does not expose Neon Auth's own endpoints", async () => {
+    for (const path of ["/api/auth/get-session", "/api/auth/sign-in/email", "/api/auth/delete-user"]) {
+      expect((await page.request.get(path)).status(), path).toBe(404);
+    }
   });
 
   test("with AI_ENABLED off there is no AI button and the endpoint is a 404", async () => {
@@ -134,36 +201,6 @@ test.describe("desktop journey", () => {
     }
     await anon.dispose();
     expect((await page.request.post("/api/cover-letter", { multipart: { company: "A", jobTitle: "B" } })).status()).toBe(404);
-  });
-
-  test("AI drafts are blocked until the email is verified", async () => {
-    test.skip(!AI, "AI is disabled in this run");
-    await addApplication(page, { company: "Blocked Co", jobTitle: "Dev" });
-    await page.getByRole("button", { name: "✨ Write with AI" }).click();
-    await page.getByRole("button", { name: "Generate draft" }).click();
-    await expect(page.getByRole("alert").filter({ hasText: "Verify your email" })).toBeVisible();
-    problems.splice(0); // the 403 is logged by the browser as a console error; expected here
-  });
-
-  test("verification email link confirms the account (one click, not on GET)", async () => {
-    const [mail] = await mailsFor(email);
-    expect(mail.subject).toMatch(/confirm your email/i);
-    const link = linkIn(mail);
-    expect(link.origin).toBe("http://localhost:3100");
-
-    await page.goto(link.pathname + link.search);
-    // Merely visiting must not verify.
-    await page.goto("/settings");
-    await expect(page.getByText("Not verified")).toBeVisible();
-
-    await page.goto(link.pathname + link.search);
-    await page.getByRole("button", { name: "Confirm my email" }).click();
-    await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.getByText("Verify your email.")).toHaveCount(0);
-
-    // Single use.
-    await page.goto(link.pathname + link.search);
-    await expect(page.getByRole("heading", { name: "Link expired" })).toBeVisible();
   });
 
   test("create an application with a new PDF resume", async () => {
@@ -273,7 +310,7 @@ test.describe("desktop journey", () => {
     await expect(page.getByText(/Drafted using your resume/)).toBeVisible();
 
     // The model really received the resume text, delimited as data.
-    const chats = (await (await fetch(`${MAIL}/chats`)).json()) as { messages: { content: string }[] }[];
+    const chats = (await (await fetch(`${MOCKS}/chats`)).json()) as { messages: { content: string }[] }[];
     const sent = chats.at(-1)!.messages.map((m) => m.content).join("\n");
     expect(sent).toContain("payments system used by two million people");
     expect(sent).toContain("Mention leadership");
@@ -354,49 +391,62 @@ test.describe("desktop journey", () => {
     await expect(page).toHaveURL(/\/dashboard/);
   });
 
-  test("forgot password: email, reset, old password dead, old sessions revoked", async () => {
+  test("forgot password: emailed code, reset, old password dead, old sessions revoked", async () => {
     // A second browser context stays signed in so we can prove it's revoked.
-    const other = await page.context().browser()!.newContext();
+    const other = await page.context().browser()!.newContext({ extraHTTPHeaders: ip("10.0.0.11") });
     const otherPage = await other.newPage();
-    await otherPage.goto("/login");
-    await otherPage.getByLabel("Email").fill(email);
-    await otherPage.getByLabel("Password").fill(PASSWORD);
-    await otherPage.getByRole("button", { name: "Sign in" }).click();
+    await signIn(otherPage, email, PASSWORD);
     await expect(otherPage).toHaveURL(/\/dashboard/);
 
     await page.getByRole("button", { name: "Sign out" }).first().click();
     await page.goto("/login");
     await page.getByRole("link", { name: "Forgot password?" }).click();
     await expect(page).toHaveURL(/\/forgot-password/); // else we'd fill the login form that's about to unmount
+
+    // An address that isn't registered gets exactly the same screen...
+    const ghost = uniqueEmail("ghost");
+    await page.getByLabel("Email").fill(ghost);
+    await page.getByRole("button", { name: "Send reset code" }).click();
+    await expect(page).toHaveURL(/\/reset-password\?email=/);
+    await expect(page.getByText(/If an account exists for/)).toBeVisible();
+    // ...but no code exists for it.
+    expect((await fetch(`${AUTH_MOCK}/__otp?email=${encodeURIComponent(ghost)}&type=forget-password`)).status).toBe(404);
+
+    await page.goto("/forgot-password");
     await page.getByLabel("Email").fill(email);
-    await page.getByRole("button", { name: "Send reset link" }).click();
-    await expect(page.getByText(/If an account exists/)).toBeVisible();
+    await page.getByRole("button", { name: "Send reset code" }).click();
+    await expect(page).toHaveURL(/\/reset-password\?email=/);
+    await expect(page.getByText(/If an account exists for/)).toBeVisible();
+    const code = await codeFor(email, "forget-password");
 
-    // Same message for an address that isn't registered.
-    await page.reload();
-    await page.getByLabel("Email").fill(uniqueEmail("ghost"));
-    await page.getByRole("button", { name: "Send reset link" }).click();
-    await expect(page.getByText(/If an account exists/)).toBeVisible();
+    // A wrong code and a mismatched confirmation are both refused.
+    await page.getByLabel("6-digit code").fill(wrongCode(code));
+    await page.getByLabel("New password", { exact: true }).fill(NEW_PASSWORD);
+    await page.getByLabel("Confirm new password").fill(NEW_PASSWORD);
+    await page.getByRole("button", { name: "Set new password" }).click();
+    await expect(page.getByText(/wrong or has expired/)).toBeVisible();
 
-    const mails = await mailsFor(email, 2); // verification + reset
-    const reset = mails.find((m) => /reset/i.test(m.subject))!;
-    const link = linkIn(reset);
-    await page.goto(link.pathname + link.search);
+    await page.getByLabel("6-digit code").fill(code);
     await page.getByLabel("New password", { exact: true }).fill(NEW_PASSWORD);
     await page.getByLabel("Confirm new password").fill("something-else-entirely");
     await page.getByRole("button", { name: "Set new password" }).click();
     await expect(page.getByText(/match/i)).toBeVisible();
 
     // Passwords are never echoed back, so a failed submit clears both fields.
+    await page.getByLabel("6-digit code").fill(code);
     await page.getByLabel("New password", { exact: true }).fill(NEW_PASSWORD);
     await page.getByLabel("Confirm new password").fill(NEW_PASSWORD);
     await page.getByRole("button", { name: "Set new password" }).click();
     await expect(page).toHaveURL(/\/login\?reset=1/);
     await expect(page.getByText("Password updated")).toBeVisible();
 
-    // Link is spent.
-    await page.goto(link.pathname + link.search);
-    await expect(page.getByRole("heading", { name: "Link expired" })).toBeVisible();
+    // The code is spent.
+    await page.goto(`/reset-password?email=${encodeURIComponent(email)}`);
+    await page.getByLabel("6-digit code").fill(code);
+    await page.getByLabel("New password", { exact: true }).fill("e2e-password-9");
+    await page.getByLabel("Confirm new password").fill("e2e-password-9");
+    await page.getByRole("button", { name: "Set new password" }).click();
+    await expect(page.getByText(/wrong or has expired/)).toBeVisible();
 
     // Other device was signed out.
     await otherPage.goto("/dashboard");
@@ -404,10 +454,7 @@ test.describe("desktop journey", () => {
     await other.close();
 
     // Old password fails, new one works.
-    await page.goto("/login");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password").fill(PASSWORD);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await signIn(page, email, PASSWORD);
     await expect(page.getByText("Incorrect email or password")).toBeVisible();
     problems.splice(0);
     await page.getByLabel("Password").fill(NEW_PASSWORD);
@@ -415,9 +462,14 @@ test.describe("desktop journey", () => {
     await expect(page).toHaveURL(/\/dashboard/);
   });
 
-  test("settings: change password, then delete the account", async () => {
+  test("settings: change password signs out other devices", async () => {
+    const other = await page.context().browser()!.newContext({ extraHTTPHeaders: ip("10.0.0.11") });
+    const otherPage = await other.newPage();
+    await signIn(otherPage, email, NEW_PASSWORD);
+    await expect(otherPage).toHaveURL(/\/dashboard/);
+
     await page.goto("/settings");
-    await expect(page.getByText(/Verified/)).toBeVisible();
+    await expect(page.getByText("Verified")).toBeVisible();
 
     await page.getByLabel("Current password").fill("not-my-password");
     await page.getByLabel("New password", { exact: true }).fill("e2e-password-3");
@@ -432,22 +484,103 @@ test.describe("desktop journey", () => {
     await page.getByRole("button", { name: "Update password" }).click();
     await expect(page.getByText(/Password updated/)).toBeVisible();
 
-    page.once("dialog", (d) => d.accept());
+    // This device stays signed in; the other one is out.
+    await page.goto("/dashboard");
+    await expect(page).toHaveURL(/\/dashboard/);
+    await otherPage.goto("/dashboard");
+    await expect(otherPage).toHaveURL(/\/login/);
+    await other.close();
+  });
+
+  test("settings: sign out of all devices", async () => {
+    const other = await page.context().browser()!.newContext({ extraHTTPHeaders: ip("10.0.0.11") });
+    const otherPage = await other.newPage();
+    await signIn(otherPage, email, "e2e-password-3");
+    await expect(otherPage).toHaveURL(/\/dashboard/);
+
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Sign out of all devices" }).click();
+    await expect(page).toHaveURL(/\/login/);
+    await otherPage.goto("/dashboard");
+    await expect(otherPage).toHaveURL(/\/login/);
+    await other.close();
+
+    await signIn(page, email, "e2e-password-3");
+    await expect(page).toHaveURL(/\/dashboard/);
+  });
+
+  test("delete account: needs the password, removes the data, ends the session", async () => {
+    await page.goto("/settings");
+    page.on("dialog", (d) => void d.accept());
+
+    await page.getByLabel("Confirm with your password").fill("not-my-password");
+    await page.getByRole("button", { name: "Delete my account" }).click();
+    await expect(page.getByText("That isn't your password")).toBeVisible();
+    await page.goto("/applications");
+    await expect(page.getByRole("link", { name: /Acme Corporation/ }).first()).toBeVisible(); // still there
+
+    await page.goto("/settings");
     await page.getByLabel("Confirm with your password").fill("e2e-password-3");
     await page.getByRole("button", { name: "Delete my account" }).click();
     await expect(page).toHaveURL(/\/\?deleted=1/);
 
-    await page.goto("/login");
-    await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password").fill("e2e-password-3");
+    await page.goto("/dashboard");
+    await expect(page).toHaveURL(/\/login/);
+    expect((await page.request.get("/api/resumes/anything")).status()).toBe(401);
+
+    // Neon Auth can't delete the sign-in identity itself (see DEPLOYMENT.md),
+    // so the credentials still work, but everything the app stored is gone:
+    // signing in again starts from an empty account.
+    await signIn(page, email, "e2e-password-3");
+    await expect(page).toHaveURL(/\/dashboard/);
+    await page.goto("/applications");
+    await expect(page.getByRole("link", { name: /Acme Corporation|Globex/ })).toHaveCount(0);
+    await page.goto("/resumes");
+    await expect(page.getByText("eve-resume.pdf")).toHaveCount(0);
+  });
+});
+
+test.describe("auth provider problems", () => {
+  test.skip(({ isMobile }) => isMobile, "desktop only");
+  test.use({ extraHTTPHeaders: ip("10.0.0.2") });
+  test.afterEach(async () => {
+    await fetch(`${AUTH_MOCK}/__outage?on=0`, { method: "POST" });
+  });
+
+  test("an outage shows an honest message, and recovery needs no restart", async ({ page }) => {
+    const email = uniqueEmail("outage");
+    await signUp(page, email);
+    await verifyEmail(page, email);
+    await page.getByRole("button", { name: "Sign out" }).first().click();
+
+    await fetch(`${AUTH_MOCK}/__outage?on=1`, { method: "POST" });
+    await signIn(page, email, PASSWORD);
+    await expect(page.getByText(/temporarily unavailable/)).toBeVisible();
+    await expect(page.getByText("Incorrect email or password")).toHaveCount(0);
+
+    await fetch(`${AUTH_MOCK}/__outage?on=0`, { method: "POST" });
+    await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page.getByText("Incorrect email or password")).toBeVisible();
-    problems.splice(0);
+    await expect(page).toHaveURL(/\/dashboard/);
+  });
+
+  test("signing up twice with one address looks the same as the first time", async ({ page }) => {
+    const email = uniqueEmail("twice");
+    await signUp(page, email);
+    await verifyEmail(page, email);
+    await page.context().clearCookies();
+
+    await signUp(page, email); // already registered: lands on the same code screen
+    await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+    // The real owner's account is untouched: their password still works.
+    await signIn(page, email, PASSWORD);
+    await expect(page).toHaveURL(/\/dashboard/);
   });
 });
 
 test.describe("mobile layout @mobile", () => {
   test.skip(({ isMobile }) => !isMobile, "mobile only");
+  test.use({ extraHTTPHeaders: ip("10.0.0.3") });
 
   test("every screen fits the viewport and is usable", async ({ page }, info) => {
     const problems = watch(page);

@@ -7,7 +7,16 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 
 const rule = { limit: 3, windowSec: 60 };
 
-beforeEach(resetDb);
+// Windows are aligned to the wall clock, so a test that straddled a boundary
+// (say 59.9 s into a 60 s window) used to fail at random. Pin the clock to a
+// fixed spot in the middle of every window instead. Only Date is faked:
+// timers are left alone so the database driver keeps working.
+const NOON = "2026-01-01T12:07:30Z";
+beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(NOON));
+  await resetDb();
+});
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
@@ -19,8 +28,7 @@ describe("hit", () => {
     for (let i = 0; i < 5; i++) results.push(await hit("k", rule));
     expect(results.map((r) => r.allowed)).toEqual([true, true, true, false, false]);
     expect(results.map((r) => r.remaining)).toEqual([2, 1, 0, 0, 0]);
-    expect(results[4].retryAfterSec).toBeGreaterThan(0);
-    expect(results[4].retryAfterSec).toBeLessThanOrEqual(60);
+    expect(results[4].retryAfterSec).toBe(30); // 12:07:30 -> window ends 12:08:00
   });
 
   it("keeps separate counters per key", async () => {
@@ -30,12 +38,10 @@ describe("hit", () => {
   });
 
   it("starts a fresh count in the next window", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-01-01T00:00:10Z"));
     for (let i = 0; i < 4; i++) await hit("k", rule);
     expect((await hit("k", rule)).allowed).toBe(false);
 
-    vi.setSystemTime(new Date("2026-01-01T00:01:05Z")); // next 60s window
+    vi.setSystemTime(new Date("2026-01-01T12:08:05Z")); // next 60s window
     expect((await hit("k", rule)).allowed).toBe(true);
   });
 

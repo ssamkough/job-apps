@@ -1,106 +1,84 @@
 import "server-only";
-import { createHash, randomBytes } from "node:crypto";
 import { cache } from "react";
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import bcrypt from "bcryptjs";
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
+import { authApi, type AuthError } from "@/lib/auth-api";
 
-export const SESSION_COOKIE = "session";
-const SESSION_DAYS = 30;
-const BCRYPT_ROUNDS = 12;
+/**
+ * Who is signed in, on top of Neon Auth.
+ *
+ * Neon Auth owns credentials, email, names and sessions. We keep a slim `User`
+ * row (id only) so applications and resumes have something to belong to; it is
+ * created the first time a verified user makes an authenticated request.
+ */
 
-// Compared against when the email doesn't exist so login timing doesn't reveal
-// which emails are registered.
-const DUMMY_HASH = bcrypt.hashSync("not-a-real-password", BCRYPT_ROUNDS);
+export type CurrentUser = {
+  /** Neon Auth user id (uuid). Also `User.id` in our database. */
+  id: string;
+  email: string;
+  /** Null when the user didn't give a name. */
+  name: string | null;
+  emailVerified: boolean;
+};
 
-export const hashPassword = (password: string) =>
-  bcrypt.hash(password, BCRYPT_ROUNDS);
-
-export async function verifyPassword(password: string, hash: string | null) {
-  return bcrypt.compare(password, hash ?? DUMMY_HASH).then((ok) => ok && !!hash);
-}
-
-const hashToken = (token: string) =>
-  createHash("sha256").update(token).digest("hex");
-
-export async function createSession(userId: string) {
-  const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
-
-  await db.session.create({
-    data: { tokenHash: hashToken(token), userId, expiresAt },
-  });
-
-  (await cookies()).set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    expires: expiresAt,
-  });
-}
-
-export async function destroySession() {
-  const jar = await cookies();
-  const token = jar.get(SESSION_COOKIE)?.value;
-  if (token) {
-    await db.session
-      .deleteMany({ where: { tokenHash: hashToken(token) } })
-      .catch(() => {});
+/** A provider outage must not look like "signed out": surface it as a 500. */
+class AuthUnavailableError extends Error {
+  constructor(public readonly cause: AuthError) {
+    super(`Neon Auth is unavailable (${cause.code})`);
   }
-  jar.delete(SESSION_COOKIE);
+}
+
+async function ensureAppUser(id: string) {
+  const exists = await db.user.findUnique({ where: { id }, select: { id: true } });
+  if (exists) return;
+  try {
+    await db.user.create({ data: { id } });
+  } catch (e) {
+    // Two requests from a brand-new user raced; the other one won.
+    if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")) throw e;
+  }
+}
+
+async function loadUser(fresh: boolean): Promise<CurrentUser | null> {
+  const { data, error } = await authApi().getSession({ fresh });
+  if (error) {
+    if (error.code === "UNAVAILABLE") throw new AuthUnavailableError(error);
+    return null;
+  }
+  if (!data) return null;
+
+  const u = data.user;
+  // Only verified users get app data: an address nobody has proven they own
+  // must not be able to start filling an account, and account recovery relies
+  // on the email. (Neon Auth is also configured to refuse unverified sign-ins;
+  // this keeps the rule even if that setting is ever turned off.)
+  if (u.emailVerified) await ensureAppUser(u.id);
+  return { id: u.id, email: u.email, name: u.name || null, emailVerified: u.emailVerified };
 }
 
 /**
- * Signs a user out of every device. With `keepCurrent`, the session making the
- * request survives (used after changing a password).
+ * The signed-in user, or null. Memoized per request. May come from the SDK's
+ * short-lived signed cookie cache, so a session revoked on another device can
+ * still pass for up to SESSION_CACHE_SECONDS; use `requireFreshUser` for
+ * sensitive actions.
  */
-export async function deleteUserSessions(
-  userId: string,
-  { keepCurrent = false }: { keepCurrent?: boolean } = {},
-) {
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  await db.session.deleteMany({
-    where: {
-      userId,
-      ...(keepCurrent && token ? { tokenHash: { not: hashToken(token) } } : {}),
-    },
-  });
-}
+export const getCurrentUser = cache(() => loadUser(false));
 
-export type CurrentUser = {
-  id: string;
-  email: string;
-  name: string | null;
-  emailVerifiedAt: Date | null;
-};
+const verifyUrl = (email: string) => `/verify-email?email=${encodeURIComponent(email)}`;
 
-/** Returns the signed-in user, or null. Memoized per request. */
-export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!token) return null;
-
-  const session = await db.session.findUnique({
-    where: { tokenHash: hashToken(token) },
-    include: {
-      user: {
-        select: { id: true, email: true, name: true, emailVerifiedAt: true },
-      },
-    },
-  });
-  if (!session) return null;
-
-  if (session.expiresAt.getTime() < Date.now()) {
-    await db.session.delete({ where: { id: session.id } }).catch(() => {});
-    return null;
-  }
-  return session.user;
-});
-
-/** Use in pages, actions, and route handlers that need a signed-in user. */
+/** Use in pages and actions that need a signed-in, verified user. */
 export async function requireUser(): Promise<CurrentUser> {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+  if (!user.emailVerified) redirect(verifyUrl(user.email));
+  return user;
+}
+
+/** Like `requireUser` but asks Neon Auth instead of trusting the cached session. */
+export async function requireFreshUser(): Promise<CurrentUser> {
+  const user = await loadUser(true);
+  if (!user) redirect("/login");
+  if (!user.emailVerified) redirect(verifyUrl(user.email));
   return user;
 }

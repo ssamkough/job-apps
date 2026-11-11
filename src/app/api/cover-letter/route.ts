@@ -45,9 +45,9 @@ export async function POST(req: Request) {
 
   // The AI runs on shared, finite hardware, so it's limited to verified
   // accounts and a handful of drafts per hour each.
-  if (!user.emailVerifiedAt) {
+  if (!user.emailVerified) {
     return NextResponse.json(
-      { error: "Verify your email address to use AI drafts. You can resend the link from Settings." },
+      { error: "Verify your email address to use AI drafts." },
       { status: 403 },
     );
   }
