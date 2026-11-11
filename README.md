@@ -14,6 +14,212 @@ default) for cover letters. Hosted on Vercel; see [DEPLOYMENT.md](./DEPLOYMENT.m
 > This repo uses a newer Next.js than most training data. Before changing
 > framework code, read the matching guide in `node_modules/next/dist/docs/`.
 
+## How it works
+
+*State as of Nov 2026 (the launch configuration: AI off, everything in the cloud).*
+
+### The pieces
+
+```mermaid
+flowchart LR
+    user(["Browser"])
+    inbox(["Your inbox"])
+
+    subgraph vercel["Vercel Hobby (function region cle1)"]
+        direction TB
+        proxy["proxy.ts<br/>redirects signed-out visitors"]
+        app["Next.js 16 app<br/>pages, server actions, API routes"]
+        proxy --> app
+    end
+
+    subgraph neon["Neon project (aws-us-east-2, Free plan)"]
+        direction TB
+        auth["Neon Auth<br/>managed Better Auth"]
+        pg[("Postgres 18<br/>schemas: public and neon_auth")]
+        s3[("Object Storage<br/>private bucket: resumes")]
+        auth -- "users, sessions, codes" --> pg
+    end
+
+    mail["Neon shared email sender"]
+    gh["GitHub<br/>ssamkough/job-apps"]
+    ollama["Ollama<br/>local model, OFF at launch"]
+
+    user -- "HTTPS" --> proxy
+    app -- "sign-up, sign-in, codes (SDK)" --> auth
+    app -- "Prisma, pooled connection<br/>app data and rate limits" --> pg
+    app -- "S3 API: resumes, server side only" --> s3
+    app -. "only if AI_ENABLED=true" .-> ollama
+    auth --> mail -- "6-digit codes" --> inbox
+    gh -- "push to main deploys" --> vercel
+```
+
+The browser only ever talks to Vercel. Neon Auth, Postgres and Object Storage
+are reached from the server, and the app deliberately does **not** expose Neon
+Auth's own endpoints (`/api/auth` is a 404). Resumes are never public: the
+bucket is private and files are streamed through the authenticated route
+`/api/resumes/[id]`.
+
+### Sign-up, verification and every request after it
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Browser
+    participant A as Next.js app
+    participant DB as Postgres (public)
+    participant N as Neon Auth
+    participant M as Neon mail sender
+
+    U->>A: sign-up form (server action)
+    A->>DB: rate-limit check (per IP)
+    A->>N: sign-up
+    N->>M: send 6-digit code
+    M-->>U: email (code valid 5 minutes)
+    U->>A: enter code (server action)
+    A->>DB: rate-limit check (per IP and per email)
+    A->>N: verify code
+    N-->>A: session cookies (HttpOnly, Secure, SameSite=Lax)
+    A-->>U: redirect to /dashboard
+
+    Note over U,N: Every later request
+    U->>A: page, action or API call with cookies
+    A->>N: get session (skipped while the signed 60 s cache cookie is fresh)
+    A->>DB: create the slim User row on the first verified request
+    A->>DB: query data, always filtered by the user's id
+```
+
+Signed-out visitors are redirected by `proxy.ts`, but that is only a
+convenience: every page, server action and API route checks the user itself
+(`requireUser`), and anything sensitive (password change, account deletion)
+uses `requireFreshUser`, which skips the 60 s cache.
+
+### Resume upload and download
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Browser
+    participant A as Next.js app
+    participant S as Object Storage
+    participant DB as Postgres
+
+    U->>A: upload (PDF, DOC or DOCX, up to 4 MB)
+    A->>A: check size and sniff the real file type from its bytes
+    A->>S: PUT resumes/{userId}/{uuid}
+    A->>DB: insert Resume row (label, name, type, size, storageKey)
+    U->>A: GET /api/resumes/{id}
+    A->>DB: find the row where id AND userId match
+    A->>S: GET the object
+    A-->>U: attachment download (nosniff, no-store)
+```
+
+The 4 MB cap exists because Vercel rejects request bodies over 4.5 MB.
+
+### The data
+
+Two kinds of data live in the same Neon Postgres database, in different schemas:
+
+| Where | What | Who owns it |
+| --- | --- | --- |
+| `neon_auth` schema | Users (email, name, password hash), sessions, verification codes | Neon Auth. The app never writes here |
+| `public` schema | `User` (just the Neon Auth user id), `Application`, `StatusEvent`, `Resume`, `RateLimit` | This app, via Prisma migrations |
+| Object Storage bucket `resumes` | The resume files, keyed `{userId}/{uuid}` | This app, through one S3 credential |
+| Browser cookies | `__Secure-neon-auth.*`: the session token and a signed 60 s session cache | Set by the Neon Auth SDK |
+
+```mermaid
+erDiagram
+    NEON_AUTH_USER ||--o| USER : "same id, no foreign key"
+    USER ||--o{ APPLICATION : owns
+    USER ||--o{ RESUME : owns
+    RESUME |o--o{ APPLICATION : "attached to"
+    APPLICATION ||--o{ STATUS_EVENT : "status history"
+
+    NEON_AUTH_USER {
+        uuid id PK
+        text email
+        text name
+    }
+    USER {
+        text id PK "the Neon Auth user id"
+        timestamp createdAt
+    }
+    APPLICATION {
+        text id PK
+        text company
+        text jobTitle
+        text status "see statuses below"
+        date dateApplied
+        text coverLetter
+        text notes
+        text resumeId FK "set null when the resume is deleted"
+        timestamp statusUpdatedAt
+    }
+    RESUME {
+        text id PK
+        text label
+        text fileName
+        text mimeType
+        int size
+        text storageKey UK
+    }
+    STATUS_EVENT {
+        text id PK
+        text fromStatus
+        text toStatus
+        timestamp createdAt
+    }
+    RATE_LIMIT {
+        text key PK
+        timestamp windowStart PK
+        int count
+    }
+```
+
+(`RateLimit` stands alone: it holds counters keyed by IP, email or user id.
+`Application` also stores the job URL, location, work type, salary, source,
+description, contact name and contact email; they are left out of the diagram
+for space.)
+
+Deleting a `User` cascades to their applications, resumes and status history.
+Deleting a `Resume` keeps the applications that used it.
+
+**Statuses:** `WISHLIST` → `APPLIED` → `SCREENING` → `INTERVIEWING` → `OFFER` →
+`ACCEPTED`, plus `REJECTED` and `WITHDRAWN`. An active application (applied,
+screening, interviewing or offer) with no status change for **14 days** is
+flagged as stale on the dashboard.
+
+**Rate limits** (Postgres fixed windows, no Redis):
+
+| Action | Limit |
+| --- | --- |
+| Sign-up | 5 per hour per IP |
+| Sign-in | 20 per 15 min per IP, and 10 failures per 15 min per email |
+| Send a code | 15 per hour per IP, and 4 per hour per email |
+| Submit a code | 20 per 15 min per IP, and 10 per 15 min per email |
+| Password check (change password, delete account) | 10 per 15 min per user |
+| AI cover letter (when enabled) | 15 per hour per user |
+
+**Free-tier ceilings that matter** (details and caveats in
+[DEPLOYMENT.md](./DEPLOYMENT.md#free-tier-limits)): Neon Free gives 100
+compute-hours, 1 GB of Postgres and 5 GB of storage a month, and the database
+sleeps after 5 idle minutes, so the first request after a nap is slow. Vercel
+Hobby is for personal, non-commercial use.
+
+### Services
+
+| Service | What it does here | Link |
+| --- | --- | --- |
+| GitHub | Source code (public repo) and the trigger for deploys | [ssamkough/job-apps](https://github.com/ssamkough/job-apps) |
+| Vercel | Hosts the app (Hobby plan) | [vercel.com](https://vercel.com) · [docs](https://vercel.com/docs) · [regions](https://vercel.com/docs/regions) · [fair use](https://vercel.com/docs/limits/fair-use-guidelines) |
+| Neon | One project holds Postgres, Auth and Object Storage | [Console](https://console.neon.tech) · [docs](https://neon.com/docs) · [plans](https://neon.com/docs/introduction/plans.md) |
+| Neon Postgres | App data, rate limits and the `neon_auth` schema | [docs](https://neon.com/docs) |
+| Neon Auth | Accounts, sessions, emailed codes (managed Better Auth) | [docs](https://neon.com/docs/auth/about.md) · [Next.js SDK](https://neon.com/docs/auth/reference/nextjs-server.md) · [troubleshooting](https://neon.com/docs/auth/troubleshooting.md) |
+| Neon Object Storage | The private `resumes` bucket (S3-compatible) | [buckets](https://neon.com/docs/storage/buckets.md) · [credentials](https://neon.com/docs/storage/authentication.md) |
+| Neon shared email sender | Sends the verification and reset codes from `auth@mail.myneon.app` | [email verification](https://neon.com/docs/auth/guides/email-verification.md) |
+| Prisma | Database client and migrations | [prisma.io](https://www.prisma.io/docs) |
+| Ollama (off) | Local model for AI cover letters, only when `AI_ENABLED=true` | [ollama.com](https://ollama.com) |
+| Uptime monitor (optional) | Not set up yet; see the interval advice in DEPLOYMENT.md | [DEPLOYMENT.md](./DEPLOYMENT.md#operations) |
+
 ## Run it locally
 
 Prerequisites: Node 20.9+ (developed on Node 24), a local PostgreSQL, and a

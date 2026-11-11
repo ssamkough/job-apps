@@ -17,12 +17,6 @@ datasource db {
 // `id` IS the Neon Auth user id (a uuid, kept as text). Rows are created lazily
 // on a user's first authenticated request (see src/lib/auth.ts). There is
 // deliberately no foreign key into `neon_auth.*`: that schema belongs to Neon.
-// Slim app-side mirror of a Neon Auth user. Credentials, email, name and
-// sessions all live in Neon Auth (the `neon_auth` schema); this table exists so
-// Application/Resume rows have something to reference and cascade from.
-// `id` IS the Neon Auth user id (a uuid, kept as text). Rows are created lazily
-// on a user's first authenticated request (see src/lib/auth.ts). There is
-// deliberately no foreign key into `neon_auth.*`: that schema belongs to Neon.
 model User {
   id           String        @id
   createdAt    DateTime      @default(now())
