@@ -22,6 +22,7 @@
     "@prisma/client": "^6.19.3",
     "mammoth": "^1.13.0",
     "next": "16.4.5",
+    "node-html-parser": "^9.0.7",
     "prisma": "^6.19.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",

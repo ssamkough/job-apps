@@ -4,7 +4,7 @@ import { db } from "@/lib/db";
 /** Wipes every table so each test starts from a known state. */
 export async function resetDb() {
   await db.$executeRawUnsafe(
-    `TRUNCATE "StatusEvent", "Application", "Resume", "RateLimit", "User" RESTART IDENTITY CASCADE`,
+    `TRUNCATE "StatusEvent", "Application", "Resume", "ImportJob", "RateLimit", "User" RESTART IDENTITY CASCADE`,
   );
 }
 

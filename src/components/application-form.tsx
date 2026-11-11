@@ -43,6 +43,7 @@ export function ApplicationForm({
   aiEnabled = false,
   submitLabel,
   saved,
+  id,
 }: {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   initial: ApplicationFormValues;
@@ -50,6 +51,8 @@ export function ApplicationForm({
   aiEnabled?: boolean;
   submitLabel: string;
   saved?: boolean;
+  /** DOM id, so something outside the form (the importer) can find it. */
+  id?: string;
 }) {
   const [state, formAction] = useActionState(action, initialState);
   const err = state.errors ?? {};
@@ -65,7 +68,7 @@ export function ApplicationForm({
   const hasErrors = Object.values(err).some(Boolean);
 
   return (
-    <form action={formAction} className="space-y-6" noValidate>
+    <form id={id} action={formAction} className="space-y-6" noValidate>
       {saved && !hasErrors && (
         <div
           role="status"

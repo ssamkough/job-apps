@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { createApplication } from "@/app/actions/applications";
-import { aiEnabled } from "@/lib/features";
+import { aiEnabled, importAiEnabled, importEnabled } from "@/lib/features";
 import { todayDateInput } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
+import { ImportBox } from "@/components/import-box";
 import {
   ApplicationForm,
   type ApplicationFormValues,
@@ -44,7 +45,11 @@ export default async function NewApplicationPage() {
         title="Add application"
         description="Only company and job title are required. You can fill in the rest later."
       />
+      {importEnabled() && (
+        <ImportBox formId="application-form" queueAvailable={importAiEnabled()} />
+      )}
       <ApplicationForm
+        id="application-form"
         action={createApplication}
         initial={{ ...empty, dateApplied: todayDateInput() }}
         resumes={resumes}

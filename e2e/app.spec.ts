@@ -263,6 +263,80 @@ test.describe("desktop journey", () => {
     await expect(page).toHaveURL(/\/applications\/new/);
   });
 
+  test("import from a posting: pasted text and PDF fill only blank fields, and Undo restores them", async () => {
+    const posting =
+      "Platform Engineer. We are hiring someone to build and run our internal services, " +
+      "own reliability, and mentor the team. You will work with Go, Postgres and Kubernetes.";
+    await addApplication(page, { company: "Mine Co", jobTitle: "Dev" });
+    const box = page.getByTestId("import-box");
+
+    await box.getByRole("tab", { name: "Paste text" }).click();
+    await box.getByLabel("Job posting text").fill(posting);
+    await box.getByRole("button", { name: "Import" }).click();
+    await expect(page.getByLabel("Job description")).toHaveValue(posting);
+    await expect(box.getByRole("status")).toContainText("Filled in description");
+    await expect(box).toContainText("couldn't be detected automatically");
+    // What the person typed is never replaced.
+    await expect(page.getByLabel("Company *")).toHaveValue("Mine Co");
+    await expect(page.getByLabel("Job title *")).toHaveValue("Dev");
+
+    await box.getByRole("button", { name: "Undo" }).click();
+    await expect(page.getByLabel("Job description")).toHaveValue("");
+
+    await box.getByRole("tab", { name: "PDF" }).click();
+    await box.getByLabel("Job posting PDF").setInputFiles({
+      name: "posting.pdf",
+      mimeType: "application/pdf",
+      buffer: makePdf(["Data Engineer at Initech", posting.slice(0, 80), posting.slice(80)]),
+    });
+    await box.getByRole("button", { name: "Import" }).click();
+    await expect(page.getByLabel("Job description")).toHaveValue(/Data Engineer at Initech/);
+
+    // Imported fields look different until the person edits them. (Nothing is saved here:
+    // later tests count applications.)
+    const description = page.getByLabel("Job description");
+    await expect(description).toHaveClass(/bg-amber-50/);
+    await description.fill("Edited by hand");
+    await expect(description).not.toHaveClass(/bg-amber-50/);
+  });
+
+  test("import from a posting: private addresses and bad input get a clear message", async ({ browser }) => {
+    // Expected 4xx answers show up as browser console errors, so use a copy of this session.
+    const ctx = await browser.newContext({
+      storageState: await page.context().storageState(),
+      extraHTTPHeaders: ip("10.0.0.1"),
+    });
+    const p = await ctx.newPage();
+    await p.goto("/applications/new");
+    const box = p.getByTestId("import-box");
+
+    for (const url of ["http://169.254.169.254/latest/meta-data/", "http://localhost:3100/api/health"]) {
+      await box.getByLabel("Job posting link").fill(url);
+      await box.getByRole("button", { name: "Import" }).click();
+      await expect(box.getByRole("alert")).toContainText("can't be imported");
+    }
+
+    await box.getByLabel("Job posting link").fill("not a link");
+    await box.getByRole("button", { name: "Import" }).click();
+    await expect(box.getByRole("alert")).toContainText("doesn't look like a web address");
+
+    await box.getByRole("tab", { name: "Paste text" }).click();
+    await box.getByLabel("Job posting text").fill("too short");
+    await box.getByRole("button", { name: "Import" }).click();
+    await expect(box.getByRole("alert")).toContainText("Paste a bit more");
+
+    // Nothing was filled in by any of the failures.
+    await expect(p.getByLabel("Company *")).toHaveValue("");
+    await expect(p.getByLabel("Job description")).toHaveValue("");
+
+    // The endpoint is closed to signed-out callers.
+    const anon = await request.newContext({ baseURL: "http://localhost:3100" });
+    expect((await anon.post("/api/import", { multipart: { text: "x".repeat(200) } })).status()).toBe(401);
+    expect((await anon.get("/api/import/abc")).status()).toBe(401);
+    await anon.dispose();
+    await ctx.close();
+  });
+
   test("more applications, list search, and inline status changes", async () => {
     await addApplication(page, { company: "Globex", jobTitle: "Designer", status: "WISHLIST" });
     await page.getByRole("button", { name: /^(Save|Add|Create)/ }).click();

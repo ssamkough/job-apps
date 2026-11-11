@@ -36,6 +36,8 @@ export default defineConfig({
         UPLOAD_DIR: "./data/e2e-uploads",
         // E2E_AI=false exercises the no-AI launch configuration.
         AI_ENABLED: process.env.E2E_AI === "false" ? "false" : "true",
+        // Job-posting import without the AI worker (no queue is wired up here).
+        IMPORT_ENABLED: "true",
         OLLAMA_BASE_URL: "http://127.0.0.1:11500",
         OLLAMA_MODEL: "mock",
         // The app talks to an in-process stand-in for Neon Auth (e2e/mock-neon-auth.mjs).
