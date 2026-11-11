@@ -145,6 +145,11 @@ describe("readResumeUpload", () => {
     expect(real.ok).toBe(true);
   });
 
+  it("the upload cap is 4 MB, which fits under the 4.5 MB server-action body limit", () => {
+    expect(MAX_RESUME_MB).toBe(4);
+    expect(MAX_RESUME_BYTES).toBe(4 * 1024 * 1024);
+  });
+
   it("rejects empty, missing and oversized files", async () => {
     expect((await readResumeUpload(null)).ok).toBe(false);
     expect((await readResumeUpload(fileFrom(Buffer.alloc(0), "a.pdf"))).ok).toBe(false);

@@ -64,7 +64,8 @@ async function call<T>(run: () => Promise<unknown>, pick: (data: unknown) => T):
   } catch (e) {
     // The SDK throws for failures it can't classify (not for network errors,
     // which it returns). Treat them as the provider being unavailable.
-    return { data: null, error: { code: "UNAVAILABLE", status: 503, message: e instanceof Error ? e.message : "error" } };
+    void e; // the message could contain anything; only the fact matters
+    return { data: null, error: { code: "UNAVAILABLE", status: 503 } };
   }
   if (res?.error) return { data: null, error: mapSdkError(res.error) };
   return { data: pick(res?.data), error: null };

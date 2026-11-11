@@ -20,8 +20,8 @@ export type AuthError = {
   code: AuthErrorCode;
   /** HTTP-style status, ours (not always what Neon Auth sent). 503 means unavailable. */
   status: number;
-  /** Provider's message, for logs only. */
-  message: string;
+  // Deliberately no `message`: the provider's text is only used here to
+  // classify, then dropped, so nothing downstream can log or show it.
 };
 
 export type SdkError = {
@@ -43,7 +43,7 @@ export type SdkError = {
  */
 export function mapSdkError(e: NonNullable<SdkError>): AuthError {
   const message = e.message ?? "";
-  const make = (code: AuthErrorCode, status: number): AuthError => ({ code, status, message });
+  const make = (code: AuthErrorCode, status: number): AuthError => ({ code, status });
   const sdk = e.code ?? "";
 
   switch (sdk) {

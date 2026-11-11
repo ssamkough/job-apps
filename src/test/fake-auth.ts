@@ -28,7 +28,7 @@ export type SentCode = { to: string; type: OtpType; code: string };
 const ok = <T>(data: T): AuthResult<T> => ({ data, error: null });
 const fail = (status: number, code: AuthErrorCode): AuthResult<never> => ({
   data: null,
-  error: { status, code, message: code } satisfies AuthError,
+  error: { status, code } satisfies AuthError,
 });
 
 const ALLOWED_OTP_ATTEMPTS = 3;
@@ -119,14 +119,14 @@ export class FakeAuth implements AuthApi {
   private checkCode(email: string, type: OtpType, otp: string): AuthError | null {
     const key = `${email}:${type}`;
     const entry = this.codes.get(key);
-    if (!entry) return { status: 400, code: "INVALID_CODE", message: "Invalid OTP" };
+    if (!entry) return { status: 400, code: "INVALID_CODE" };
     if (entry.attempts >= ALLOWED_OTP_ATTEMPTS) {
       this.codes.delete(key);
-      return { status: 400, code: "INVALID_CODE", message: "Too many attempts" };
+      return { status: 400, code: "INVALID_CODE" };
     }
     if (entry.code !== otp) {
       entry.attempts++;
-      return { status: 400, code: "INVALID_CODE", message: "Invalid OTP" };
+      return { status: 400, code: "INVALID_CODE" };
     }
     this.codes.delete(key);
     return null;

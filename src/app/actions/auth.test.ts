@@ -22,8 +22,17 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({
     get: (n: string) => (h.jar.has(n) ? { name: n, value: h.jar.get(n)! } : undefined),
     getAll: () => [...h.jar].map(([name, value]) => ({ name, value })),
-    set: (n: string, v: string) => void h.jar.set(n, v),
-    delete: (n: string) => void h.jar.delete(n),
+    set: (n: string, v: string, o?: { maxAge?: number; secure?: boolean }) => {
+      // Like a browser: a "__Secure-" cookie can only be set or removed with Secure.
+      if (n.startsWith("__Secure-") && !o?.secure) throw new Error(`browser would reject ${n}: missing Secure`);
+      if (o?.maxAge === 0) h.jar.delete(n);
+      else h.jar.set(n, v);
+    },
+    delete: (n: string) => {
+      // cookies().delete() omits Secure, so it can't remove "__Secure-" cookies.
+      if (n.startsWith("__Secure-")) throw new Error(`delete() can't remove ${n}; set it expired with Secure`);
+      h.jar.delete(n);
+    },
   }),
   headers: async () => new Headers({ "x-forwarded-for": h.ip }),
 }));
@@ -359,6 +368,17 @@ describe("current user", () => {
 
     expect((await requireUser()).id).toBe(u.id); // within the cache lifetime
     expect(await run(() => requireFreshUser())).toEqual({ redirect: "/login" });
+    // ...and it drops the stale cookies, so the cache can't bounce /login back into the app.
+    expect([...h.jar.keys()]).toEqual([]);
+    expect(await getCurrentUser()).toBeNull();
+    expect(await run(() => requireUser())).toEqual({ redirect: "/login" });
+  });
+
+  it("once the cache lifetime passes, a revoked session is refused everywhere", async () => {
+    const u = h.fake.seedUser();
+    h.fake.signInAs(u);
+    await requireUser();
+    h.fake.sessions.clear();
     h.fake.expireCache();
     expect(await run(() => requireUser())).toEqual({ redirect: "/login" });
   });
@@ -538,7 +558,7 @@ describe("account settings", () => {
     h.fake.otherDevice(u);
     const revoke = vi.spyOn(h.fake, "revokeAllSessions").mockResolvedValue({
       data: null,
-      error: { status: 503, code: "UNAVAILABLE", message: "x" },
+      error: { status: 503, code: "UNAVAILABLE" },
     });
     const res = await run(() => signOutEverywhere());
     expect(res).toMatchObject({ message: expect.stringMatching(/temporarily unavailable/) });

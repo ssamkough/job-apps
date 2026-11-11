@@ -123,7 +123,7 @@ export async function logout() {
 }
 
 const CODE_NOTICE =
-  "If that address is waiting for verification, we've emailed a new code. It's valid for 5 minutes.";
+  "If that address is waiting for verification, we've emailed a new code. It's valid for 15 minutes.";
 
 /** Finishes sign-up: the emailed code proves the address, then signs the user in. */
 export async function verifyEmail(
@@ -198,7 +198,8 @@ export async function requestPasswordReset(
       const { error } = await authApi().sendOtp({ email, type: "forget-password" });
       if (error) unexpectedAuthError("request-password-reset", error);
     } catch (e) {
-      console.error("Password reset request failed", e);
+      // Only the error's name: its message or stack could contain the address.
+      console.error("Password reset request failed", e instanceof Error ? e.name : "unknown");
     }
   });
 

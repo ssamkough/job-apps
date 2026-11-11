@@ -16,7 +16,7 @@ export default async function ResetPasswordPage({
         {email ? (
           <>
             If an account exists for <strong className="text-zinc-700">{email}</strong>, we
-            emailed it a 6-digit code (valid for 5 minutes).{" "}
+            emailed it a 6-digit code (valid for 15 minutes).{" "}
           </>
         ) : (
           "Enter your email and the 6-digit code we sent you. "

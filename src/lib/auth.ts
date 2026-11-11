@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { authApi, type AuthError } from "@/lib/auth-api";
+import { clearAuthCookies } from "@/lib/auth-cookies";
 
 /**
  * Who is signed in, on top of Neon Auth.
@@ -75,10 +76,20 @@ export async function requireUser(): Promise<CurrentUser> {
   return user;
 }
 
-/** Like `requireUser` but asks Neon Auth instead of trusting the cached session. */
+/**
+ * Like `requireUser` but asks Neon Auth instead of trusting the cached session.
+ * Server actions only (it may clear cookies).
+ */
 export async function requireFreshUser(): Promise<CurrentUser> {
   const user = await loadUser(true);
-  if (!user) redirect("/login");
+  if (!user) {
+    // Neon Auth says this session is gone. Drop the browser's cookies too:
+    // otherwise the cached copy would keep passing the cheaper checks (and
+    // bounce /login straight back to the app) until it expires. Only called
+    // from server actions, which are allowed to set cookies.
+    await clearAuthCookies();
+    redirect("/login");
+  }
   if (!user.emailVerified) redirect(verifyUrl(user.email));
   return user;
 }

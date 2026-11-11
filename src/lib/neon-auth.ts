@@ -33,6 +33,9 @@ export function getNeonAuth(): NeonAuth {
     }
     instance = createNeonAuth({
       baseUrl,
+      // The SDK's own logs carry request paths and statuses; "warn" keeps the
+      // per-request info/debug chatter (and anything incidental) out of the logs.
+      logLevel: "warn",
       cookies: {
         secret,
         sessionDataTtl: SESSION_CACHE_SECONDS,

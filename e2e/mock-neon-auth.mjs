@@ -11,11 +11,13 @@
 //   GET  /__otp?email=…&type=email-verification|forget-password  -> { code }
 //   POST /__reset                                                -> forget all state
 //   POST /__outage?on=1|0                                        -> answer 503 to everything
+//   POST /__ratelimit?on=1|0                                     -> answer 429 to everything
 import { randomBytes, randomUUID } from "node:crypto";
 import http from "node:http";
 
 const BASE = "/neondb/auth";
-const ALLOWED_ORIGINS = new Set(["http://localhost:3100"]);
+// 3100 is the e2e server; 3000 lets `npm run dev` use this stand-in (see README).
+const ALLOWED_ORIGINS = new Set(["http://localhost:3100", "http://localhost:3000"]);
 const SESSION_COOKIE = "__Secure-neon-auth.session_token";
 const ALLOWED_OTP_ATTEMPTS = 3;
 
@@ -23,6 +25,7 @@ const users = new Map(); // email -> user
 const sessions = new Map(); // token -> { userId, createdAt }
 const codes = new Map(); // `${email}:${type}` -> { code, attempts }
 let outage = false;
+let limited = false;
 
 const now = () => new Date().toISOString();
 const sixDigits = () => String(100000 + (randomBytes(4).readUInt32BE() % 900000));
@@ -90,8 +93,21 @@ const json = (res, status, body) => {
   res.setHeader("content-type", "application/json");
   res.end(JSON.stringify(body));
 };
-// Messages as the real service sends them (verified against a Neon branch).
-const MESSAGES = { INVALID_OTP: "Invalid OTP", TOO_MANY_ATTEMPTS: "Too many attempts", INVALID_ORIGIN: "Invalid origin" };
+// Better Auth's messages, as the real service sends them (the OTP, origin and
+// credential ones were verified against a Neon branch). The SDK discards the
+// code and keeps only the status plus this message for errors it has no name for.
+const MESSAGES = {
+  INVALID_OTP: "Invalid OTP",
+  TOO_MANY_ATTEMPTS: "Too many attempts",
+  INVALID_ORIGIN: "Invalid origin",
+  INVALID_EMAIL_OR_PASSWORD: "Invalid email or password",
+  INVALID_PASSWORD: "Invalid password",
+  EMAIL_NOT_VERIFIED: "Email not verified",
+  PASSWORD_TOO_SHORT: "Password too short",
+  PASSWORD_TOO_LONG: "Password too long",
+  UNAUTHORIZED: "Unauthorized",
+  SERVICE_UNAVAILABLE: "Service Unavailable",
+};
 const fail = (res, status, code) => json(res, status, { code, message: MESSAGES[code] ?? code });
 
 async function readBody(req) {
@@ -230,7 +246,12 @@ http
       sessions.clear();
       codes.clear();
       outage = false;
+      limited = false;
       return json(res, 200, {});
+    }
+    if (url.pathname === "/__ratelimit") {
+      limited = url.searchParams.get("on") === "1";
+      return json(res, 200, { limited });
     }
     if (url.pathname === "/__outage") {
       outage = url.searchParams.get("on") === "1";
@@ -239,6 +260,7 @@ http
 
     if (!url.pathname.startsWith(BASE + "/")) return fail(res, 404, "NOT_FOUND");
     if (outage) return fail(res, 503, "SERVICE_UNAVAILABLE");
+    if (limited) return json(res, 429, { message: "Too many requests. Please try again later." });
 
     // Neon Auth refuses state-changing requests from origins that aren't trusted.
     if (req.method === "POST") {

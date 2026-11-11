@@ -22,8 +22,17 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({
     get: (n: string) => (h.jar.has(n) ? { name: n, value: h.jar.get(n)! } : undefined),
     getAll: () => [...h.jar].map(([name, value]) => ({ name, value })),
-    set: (n: string, v: string) => void h.jar.set(n, v),
-    delete: (n: string) => void h.jar.delete(n),
+    set: (n: string, v: string, o?: { maxAge?: number; secure?: boolean }) => {
+      // Like a browser: a "__Secure-" cookie can only be set or removed with Secure.
+      if (n.startsWith("__Secure-") && !o?.secure) throw new Error(`browser would reject ${n}: missing Secure`);
+      if (o?.maxAge === 0) h.jar.delete(n);
+      else h.jar.set(n, v);
+    },
+    delete: (n: string) => {
+      // cookies().delete() omits Secure, so it can't remove "__Secure-" cookies.
+      if (n.startsWith("__Secure-")) throw new Error(`delete() can't remove ${n}; set it expired with Secure`);
+      h.jar.delete(n);
+    },
   }),
   headers: async () => new Headers({ "x-forwarded-for": h.ip }),
 }));
@@ -186,6 +195,19 @@ describe("access control: users can't touch each other's data", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-disposition")).toMatch(/^attachment/);
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("an unverified account can't download a resume, even its own", async () => {
+    const unverified = await makeUser({ verified: false });
+    await db.user.create({ data: { id: unverified.id } }); // as if data existed from before
+    const buffer = makePdf(["mine"]);
+    const key = await saveResumeFile(unverified.id, { fileName: "r.pdf", mimeType: "application/pdf", size: buffer.length, buffer });
+    const resume = await db.resume.create({
+      data: { userId: unverified.id, label: "Mine", fileName: "r.pdf", mimeType: "application/pdf", size: buffer.length, storageKey: key },
+    });
+    signInAs(unverified);
+    const res = await downloadResume(new Request("http://x"), { params: Promise.resolve({ id: resume.id }) });
+    expect(res.status).toBe(401);
   });
 
   it("signed-out requests are refused", async () => {

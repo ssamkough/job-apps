@@ -16,7 +16,7 @@ export default async function VerifyEmailPage({
         {email ? (
           <>
             We sent a 6-digit code to <strong className="text-zinc-700">{email}</strong>.
-            Enter it to finish creating your account. It&apos;s valid for 5 minutes.
+            Enter it to finish creating your account. It&apos;s valid for 15 minutes.
           </>
         ) : (
           "Enter your email and the 6-digit code we sent you."

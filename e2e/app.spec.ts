@@ -1,4 +1,4 @@
-import { expect, request, test, type Page } from "@playwright/test";
+import { expect, request, test, type BrowserContext, type Page } from "@playwright/test";
 import { makeDocx, makePdf } from "../src/test/files";
 
 const MOCKS = "http://127.0.0.1:11501"; // Ollama stand-in's request log
@@ -28,6 +28,13 @@ async function codeFor(email: string, type: CodeType): Promise<string> {
  * group of tests presents a different address (the app trusts x-forwarded-for).
  */
 const ip = (address: string) => ({ "x-forwarded-for": address });
+/**
+ * The SDK trusts its signed `session_data` cookie for 60 s before asking Neon
+ * Auth again, so a session revoked elsewhere can still load pages inside that
+ * window (sensitive actions skip it). Drop the cookie to jump past the window.
+ */
+const expireSessionCache = (ctx: BrowserContext) =>
+  ctx.clearCookies({ name: "__Secure-neon-auth.local.session_data" });
 const wrongCode = (code: string) => (code === "000000" ? "111111" : "000000");
 
 /** Collects things that should never happen in a healthy page. */
@@ -321,7 +328,12 @@ test.describe("desktop journey", () => {
 
     await page.getByRole("button", { name: "Generate draft" }).click();
     await expect(page.getByLabel("Cover letter")).toHaveValue(/MOCK COVER LETTER BODY/);
-    await page.getByRole("button", { name: /^Save/ }).click();
+    // "Saved." may still be on screen from the previous test, so wait for the
+    // save request itself before reloading.
+    await Promise.all([
+      page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/applications/")),
+      page.getByRole("button", { name: /^Save/ }).click(),
+    ]);
     await expect(page.getByText("Saved.")).toBeVisible();
     await page.reload();
     await expect(page.getByLabel("Cover letter")).toHaveValue(/MOCK COVER LETTER BODY/);
@@ -377,6 +389,8 @@ test.describe("desktop journey", () => {
   test("sign out, wrong password, then sign in", async () => {
     await page.getByRole("button", { name: "Sign out" }).first().click();
     await expect(page).toHaveURL(/\/login/);
+    // The browser really dropped the (Secure, HttpOnly) cookies, not just the redirect.
+    expect((await page.context().cookies()).filter((c) => c.name.startsWith("__Secure-neon-auth"))).toEqual([]);
     await page.goto("/dashboard");
     await expect(page).toHaveURL(/\/login/);
 
@@ -449,6 +463,7 @@ test.describe("desktop journey", () => {
     await expect(page.getByText(/wrong or has expired/)).toBeVisible();
 
     // Other device was signed out.
+    await expireSessionCache(other);
     await otherPage.goto("/dashboard");
     await expect(otherPage).toHaveURL(/\/login/);
     await other.close();
@@ -487,6 +502,7 @@ test.describe("desktop journey", () => {
     // This device stays signed in; the other one is out.
     await page.goto("/dashboard");
     await expect(page).toHaveURL(/\/dashboard/);
+    await expireSessionCache(other);
     await otherPage.goto("/dashboard");
     await expect(otherPage).toHaveURL(/\/login/);
     await other.close();
@@ -499,8 +515,19 @@ test.describe("desktop journey", () => {
     await expect(otherPage).toHaveURL(/\/dashboard/);
 
     await page.goto("/settings");
+    await otherPage.goto("/settings"); // loaded while it is still signed in
     await page.getByRole("button", { name: "Sign out of all devices" }).click();
     await expect(page).toHaveURL(/\/login/);
+
+    // Even inside the session cache window, the revoked device can't do anything
+    // sensitive: account actions ask Neon Auth, not the cache.
+    await otherPage.getByLabel("Current password").fill("e2e-password-3");
+    await otherPage.getByLabel("New password", { exact: true }).fill("e2e-password-4");
+    await otherPage.getByLabel("Confirm new password").fill("e2e-password-4");
+    await otherPage.getByRole("button", { name: "Update password" }).click();
+    await expect(otherPage).toHaveURL(/\/login/);
+
+    await expireSessionCache(other);
     await otherPage.goto("/dashboard");
     await expect(otherPage).toHaveURL(/\/login/);
     await other.close();
@@ -545,6 +572,19 @@ test.describe("auth provider problems", () => {
   test.use({ extraHTTPHeaders: ip("10.0.0.2") });
   test.afterEach(async () => {
     await fetch(`${AUTH_MOCK}/__outage?on=0`, { method: "POST" });
+    await fetch(`${AUTH_MOCK}/__ratelimit?on=0`, { method: "POST" });
+  });
+
+  test("Neon Auth's own rate limit is explained, not shown as a wrong password", async ({ page }) => {
+    const email = uniqueEmail("limited");
+    await signUp(page, email);
+    await verifyEmail(page, email);
+    await page.getByRole("button", { name: "Sign out" }).first().click();
+
+    await fetch(`${AUTH_MOCK}/__ratelimit?on=1`, { method: "POST" });
+    await signIn(page, email, PASSWORD);
+    await expect(page.getByText(/Too many attempts. Please wait a minute/)).toBeVisible();
+    await expect(page.getByText("Incorrect email or password")).toHaveCount(0);
   });
 
   test("an outage shows an honest message, and recovery needs no restart", async ({ page }) => {
