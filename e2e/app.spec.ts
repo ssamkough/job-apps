@@ -1,4 +1,5 @@
 import { expect, request, test, type BrowserContext, type Page } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
 import { makeDocx, makePdf } from "../src/test/files";
 
 const MOCKS = "http://127.0.0.1:11501"; // Ollama stand-in's request log
@@ -453,6 +454,53 @@ test.describe("desktop journey", () => {
 
     await page.goto("/applications");
     await expect(page.getByRole("link", { name: /Globex/ }).first()).toBeVisible();
+  });
+
+  test("accessibility: no WCAG A/AA violations on the main screens", async () => {
+    await page.goto("/applications");
+    const detail = await page.locator('a[href^="/applications/"]:not([href="/applications/new"])').first().getAttribute("href");
+    const paths = ["/dashboard", "/applications", "/applications/new", detail!, `${detail}/edit`, "/resumes", "/settings"];
+    const found: string[] = [];
+    for (const path of paths) {
+      await page.goto(path);
+      await page.waitForLoadState("networkidle");
+      const { violations } = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"]).analyze();
+      for (const v of violations) {
+        found.push(`${path.replace(/[0-9a-z]{25}/, ":id")} [${v.impact}] ${v.id}: ${v.nodes.length}x e.g. ${v.nodes[0].target.join(" ")} :: ${v.nodes[0].failureSummary?.split("\n").slice(1, 3).join(" ")}`);
+      }
+    }
+    expect(found).toEqual([]);
+  });
+
+  test("accessibility: skip link, and the status pill is a centered, 24px+ target with a visible focus ring", async () => {
+    await page.goto("/dashboard");
+    await page.keyboard.press("Tab");
+    const skip = page.getByRole("link", { name: "Skip to main content" });
+    await expect(skip).toBeFocused();
+    await expect(skip).toBeVisible();
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/#main$/);
+
+    await page.goto("/applications");
+    const pill = page.getByRole("combobox", { name: /^Status for / }).first();
+    await expect(pill).toBeVisible();
+    const style = await pill.evaluate((el) => {
+      const s = getComputedStyle(el);
+      const box = el.getBoundingClientRect();
+      return { align: s.textAlign, alignLast: s.textAlignLast, h: box.height, w: box.width };
+    });
+    expect(style.align).toBe("center");
+    expect(style.alignLast).toBe("center");
+    expect(style.h).toBeGreaterThanOrEqual(24);
+    // Every pill is the same width, whatever the status.
+    const widths = await page.getByRole("combobox", { name: /^Status for / }).evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+    expect(new Set(widths).size).toBe(1);
+
+    await pill.focus();
+    await page.keyboard.press("Shift+Tab");
+    await page.keyboard.press("Tab");
+    const outline = await pill.evaluate((el) => getComputedStyle(el.parentElement!).outlineStyle);
+    expect(outline).not.toBe("none");
   });
 
   test("delete an application", async () => {

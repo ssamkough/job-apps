@@ -16,7 +16,7 @@ export default async function AuthLayout({
   if (user?.emailVerified) redirect("/dashboard");
 
   return (
-    <main className="flex flex-1 flex-col items-center justify-center px-4 py-12">
+    <main id="main" tabIndex={-1} className="focus:outline-none flex flex-1 flex-col items-center justify-center px-4 py-12">
       <Link
         href="/"
         className="mb-8 flex items-center gap-2 text-lg font-semibold text-zinc-900"

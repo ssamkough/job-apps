@@ -42,7 +42,7 @@ export default async function Home() {
         </nav>
       </header>
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6">
+      <main id="main" tabIndex={-1} className="focus:outline-none mx-auto w-full max-w-6xl flex-1 px-4 sm:px-6">
         <section className="py-16 sm:py-24">
           <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-zinc-900 sm:text-5xl">
             Keep your whole job search organized.

@@ -6,7 +6,7 @@ export function StatusBadge({ status }: { status: string }) {
   return (
     <span
       className={cx(
-        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
+        "inline-flex min-w-24 items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset",
         STATUS_STYLES[status].badge,
       )}
     >

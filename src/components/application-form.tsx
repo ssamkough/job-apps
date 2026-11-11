@@ -304,7 +304,7 @@ export function ApplicationForm({
         </div>
       </div>
 
-      <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-3 border-t border-zinc-800 bg-zinc-900/95 px-4 py-3 shadow-lg backdrop-blur sm:-mx-6 sm:px-6 lg:mx-0 lg:rounded-xl lg:border">
+      <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-3 border-t border-zinc-800 bg-zinc-900 px-4 py-3 shadow-lg sm:-mx-6 sm:px-6 lg:mx-0 lg:rounded-xl lg:border">
         <Link
           href="/applications"
           className={buttonClass("onDark")}
