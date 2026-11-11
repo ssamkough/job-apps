@@ -33,6 +33,11 @@ const securityHeaders = [
     : [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" }]),
 ];
 
+// The app's home. Sessions are cookies on one host, so everything is served
+// from here; the original *.vercel.app address just forwards to it.
+const CANONICAL_ORIGIN = "https://www.jobapphelp.net";
+const LEGACY_HOSTS = ["job-apps-pi.vercel.app"];
+
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   turbopack: {
@@ -49,6 +54,16 @@ const nextConfig: NextConfig = {
       // MAX_RESUME_MB). Vercel itself rejects request bodies over 4.5 MB.
       bodySizeLimit: "4.5mb",
     },
+  },
+  async redirects() {
+    // Temporary (307) on purpose: browsers cache permanent redirects for a long
+    // time, which makes them hard to undo. Make it permanent once settled.
+    return LEGACY_HOSTS.map((host) => ({
+      source: "/:path*",
+      has: [{ type: "host" as const, value: host }],
+      destination: `${CANONICAL_ORIGIN}/:path*`,
+      permanent: false,
+    }));
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

@@ -2,8 +2,8 @@
 
 Runbook for the launch setup: **Vercel Hobby + one Neon project** providing
 Postgres, Auth and Object Storage, all on free tiers. The app goes live on its
-`*.vercel.app` URL first; a custom domain can come later. **AI is off** at
-launch (`AI_ENABLED` unset).
+`*.vercel.app` URL first and has since moved to its own domain (see
+[Custom domain](#custom-domain)). **AI is off** at launch (`AI_ENABLED` unset).
 
 This repo is **public**. Never put real secrets, connection strings with
 credentials, key ids, personal emails or passwords in this file or anywhere
@@ -349,19 +349,30 @@ you also set `LIVE_ALLOW_ACCOUNT_JOURNEY=1`, `LIVE_TEST_EMAIL` and
    account" removes only app data, so remove the identity itself in the Neon
    Console (the Auth section's users list; exact label unverified) or through the Neon API.
 
-## Custom domain, later
+## Custom domain
 
-1. Vercel → Project → Settings → Domains → add the domain and the DNS records
+The app lives at **https://www.jobapphelp.net**. The apex `jobapphelp.net` is
+redirected to `www` by Vercel (Settings -> Domains), and the original
+`job-apps-pi.vercel.app` address forwards to `www` from `next.config.ts`
+(`LEGACY_HOSTS`, a temporary 307; make it permanent once you're sure).
+
+What was changed to move, and what to repeat for any future move:
+
+1. Vercel -> Project -> Settings -> Domains -> add the domain and the DNS records
    Vercel shows.
-2. In Neon Auth, **add the new exact origin** (e.g. `https://app.example.com`,
-   and `https://www.…` if you serve it) to trusted domains. **Keep the old
-   `*.vercel.app` origin** until traffic has moved and the new origin is
-   verified, then remove it.
+2. In Neon Auth, **add the exact origin** of every host people can reach
+   (here `https://www.jobapphelp.net` and `https://jobapphelp.net`; never a
+   wildcard). Keep the old origin until traffic has moved, then remove it.
+   Check with a wrong-password sign-in carrying the new `Origin` header: a
+   trusted origin answers `INVALID_EMAIL_OR_PASSWORD`, an untrusted one
+   `INVALID_ORIGIN`.
 3. Update `SUPPORT_EMAIL` in Vercel if you want an address on the new domain,
-   then redeploy.
-4. Nothing else changes: there's no `APP_URL` to update. Session cookies are
-   host-only, so users sign in again on the new host.
-5. Re-run the smoke test on the new origin.
+   then redeploy. Do this only once that mailbox exists.
+4. Nothing else changes: there's no `APP_URL` to update. Accounts live in Neon
+   Auth and aren't tied to a domain, but session cookies are host-only, so
+   people sign in again on the new host.
+5. Re-run the smoke test on the new origin
+   (`LIVE_BASE_URL=https://www.jobapphelp.net npm run test:live`).
 
 ## Operations
 
