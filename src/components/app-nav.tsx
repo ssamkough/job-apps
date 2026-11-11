@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { logout } from "@/app/actions/auth";
 import { LogoMark } from "@/components/logo";
 import { cx } from "@/components/ui";
+import { SITE_NAME } from "@/lib/site";
 
 const items = [
   { href: "/dashboard", label: "Dashboard" },
@@ -25,7 +26,7 @@ function Brand() {
       className="flex items-center gap-2 font-semibold text-zinc-900"
     >
       <LogoMark />
-      Job Tracker
+      {SITE_NAME}
     </Link>
   );
 }

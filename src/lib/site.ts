@@ -1,4 +1,4 @@
-export const SITE_NAME = "Job Tracker";
+export const SITE_NAME = "Job Application Helper";
 
 /** Where users reach a human. Set SUPPORT_EMAIL in production. */
 export function supportEmail() {

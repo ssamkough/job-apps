@@ -4,6 +4,7 @@ import { aiEnabled } from "@/lib/features";
 import { LinkButton } from "@/components/ui";
 import { LogoMark } from "@/components/logo";
 import { SiteFooter } from "@/components/site-footer";
+import { SITE_NAME } from "@/lib/site";
 
 const features = (ai: boolean) => [
   {
@@ -31,7 +32,7 @@ export default async function Home() {
       <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-5 sm:px-6">
         <span className="flex items-center gap-2 font-semibold text-zinc-900">
           <LogoMark />
-          Job Tracker
+          {SITE_NAME}
         </span>
         <nav className="flex items-center gap-2">
           <LinkButton href="/login" variant="ghost">

@@ -1,4 +1,4 @@
-# Job Tracker
+# Job Application Helper
 
 Track every job application in one place: status, the resume you sent, an
 optional AI-assisted cover letter, dates, notes, contacts, and dashboard

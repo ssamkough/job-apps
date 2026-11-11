@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { LogoMark } from "@/components/logo";
 import { SiteFooter } from "@/components/site-footer";
+import { SITE_NAME } from "@/lib/site";
 
 export default async function AuthLayout({
   children,
@@ -21,7 +22,7 @@ export default async function AuthLayout({
         className="mb-8 flex items-center gap-2 text-lg font-semibold text-zinc-900"
       >
         <LogoMark size={36} />
-        Job Tracker
+        {SITE_NAME}
       </Link>
       <div className="w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-6 shadow-sm sm:p-8">
         {children}

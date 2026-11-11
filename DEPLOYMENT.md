@@ -142,14 +142,14 @@ CLI and API equivalents are in Neon's docs):
 | Verification **method** | **Code** (OTP), not link | Links need a custom email provider; codes work with the shared sender ([email verification](https://neon.com/docs/auth/guides/email-verification.md)) |
 | **Revoke sessions on password reset** | **on** | A reset ends every existing session on every device ([password reset](https://neon.com/docs/auth/guides/password-reset.md)). The app's reset flow relies on it |
 | **Organization** plugin | **off** | The app has no organizations; less surface |
-| **Application name** | `Job Tracker` | Shown in the verification and reset emails; defaults to the project name. Changeable under Settings → Better Auth → Project Info |
+| **Application name** | `Job Application Helper` | Shown in the verification and reset emails; defaults to the project name. Changeable under Settings → Better Auth → Project Info |
 | **Trusted domains** | Empty until the live URL is known, then the **exact** origin (see [Go-live](#go-live)) | Neon Auth rejects state-changing requests from untrusted origins with `INVALID_ORIGIN`. **Never add a wildcard** such as `https://*.vercel.app`: that would trust every Vercel app ([configure domains](https://neon.com/docs/auth/guides/configure-domains.md)) |
 | **Allow localhost** | On until go-live, then **off** | On by default for development; it trusts any localhost origin. Turn it off once the live origin works ([production checklist](https://neon.com/docs/auth/production-checklist.md)). It has no effect on your development branch |
 
 > **State at launch.** Production Auth: email + password only; verification
 > required, method = code; revoke-sessions-on-reset on; Organization plugin
 > off; the Google provider (Neon's shared dev credentials) removed; application
-> name `Job Tracker`; **trusted domains empty and Allow localhost on**, because
+> name `Job Application Helper`; **trusted domains empty and Allow localhost on**, because
 > the live URL wasn't known yet. **Until the origin is added, sign-up from the
 > deployed URL fails with an invalid-origin error. That is expected on the very
 > first deploy.**

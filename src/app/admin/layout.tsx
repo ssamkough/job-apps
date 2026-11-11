@@ -3,10 +3,11 @@ import Link from "next/link";
 import { requireAdmin } from "@/lib/admin";
 import { LogoMark } from "@/components/logo";
 import { SiteFooter } from "@/components/site-footer";
+import { SITE_NAME } from "@/lib/site";
 
 // Admin pages are never for search engines, even though they sit behind auth.
 export const metadata: Metadata = {
-  title: { default: "Admin", template: "%s · Admin · Job Tracker" },
+  title: { default: "Admin", template: `%s · Admin · ${SITE_NAME}` },
   robots: { index: false, follow: false },
 };
 
