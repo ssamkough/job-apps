@@ -10,7 +10,7 @@ import {
   WORK_TYPES,
   WORK_TYPE_LABELS,
 } from "@/lib/constants";
-import { Card, Field, inputClass } from "@/components/ui";
+import { Card, Field, buttonClass, inputClass } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { CoverLetterEditor } from "@/components/cover-letter-editor";
 
@@ -304,14 +304,14 @@ export function ApplicationForm({
         </div>
       </div>
 
-      <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-3 border-t border-zinc-200 bg-background/90 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:mx-0 lg:rounded-xl lg:border">
+      <div className="sticky bottom-0 -mx-4 flex items-center justify-end gap-3 border-t border-zinc-800 bg-zinc-900/95 px-4 py-3 shadow-lg backdrop-blur sm:-mx-6 sm:px-6 lg:mx-0 lg:rounded-xl lg:border">
         <Link
           href="/applications"
-          className="rounded-lg px-3.5 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100"
+          className={buttonClass("onDark")}
         >
           Cancel
         </Link>
-        <SubmitButton>{submitLabel}</SubmitButton>
+        <SubmitButton variant="brass">{submitLabel}</SubmitButton>
       </div>
     </form>
   );

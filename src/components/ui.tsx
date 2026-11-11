@@ -17,6 +17,9 @@ const buttonVariants = {
     "border border-zinc-300 bg-white text-zinc-800 shadow-sm hover:bg-zinc-50",
   danger: "border border-rose-200 bg-white text-rose-700 hover:bg-rose-50",
   ghost: "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900",
+  // For dark surfaces (the form's action bar): the logo's brass clasp.
+  brass: "bg-(--gold) text-zinc-900 shadow-sm hover:brightness-110",
+  onDark: "text-zinc-100 hover:bg-white/10 hover:text-white",
 } as const;
 
 export type ButtonVariant = keyof typeof buttonVariants;
