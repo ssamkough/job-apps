@@ -105,7 +105,11 @@ export async function deleteAccount(
   try {
     for (const r of resumes) await deleteResumeFileStrict(r.storageKey);
   } catch (e) {
-    console.error("Account deletion: could not delete a resume file", e);
+    // Name only: storage errors can include bucket hosts and object keys.
+    console.error(
+      "Account deletion: could not delete a resume file",
+      e instanceof Error ? e.name : "UnknownError",
+    );
     return {
       message: "We couldn't delete your uploaded files. Nothing was deleted. Please try again.",
     };

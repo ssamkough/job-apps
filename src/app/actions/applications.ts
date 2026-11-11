@@ -137,8 +137,10 @@ export async function updateApplication(
     Object.entries(data).map(([k, v]) => [k, v ?? null]),
   ) as typeof data;
 
+  // `userId` in the filter as well as the earlier ownership check: a row that
+  // is not the caller's can never be written, even if this code is refactored.
   await db.application.update({
-    where: { id },
+    where: { id, userId: user.id },
     data: {
       ...columns,
       resumeId,
@@ -165,7 +167,7 @@ export async function updateApplicationStatus(id: string, status: string) {
 
   if (existing.status !== status) {
     await db.application.update({
-      where: { id },
+      where: { id, userId: user.id },
       data: {
         status,
         statusUpdatedAt: new Date(),

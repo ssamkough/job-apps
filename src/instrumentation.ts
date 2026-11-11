@@ -9,17 +9,23 @@ export const onRequestError: Instrumentation.onRequestError = async (err, reques
   const error = err instanceof Error ? err : new Error(String(err));
   const digest =
     typeof err === "object" && err !== null && "digest" in err ? String(err.digest) : undefined;
+  const path = request.path.split("?")[0]; // drop the query: it can hold email addresses
+  // Pages that handle passwords, codes or sessions: keep the error's name and
+  // digest (enough to find it in the host's logs) but not its text or stack,
+  // which could echo user input.
+  const sensitive = /^\/(login|signup|verify-email|forgot-password|reset-password|settings)(\/|$)/.test(path);
   console.error(
     JSON.stringify({
       level: "error",
       time: new Date().toISOString(),
-      message: error.message,
+      name: error.name,
+      message: sensitive ? "[redacted: auth route]" : error.message,
       digest,
-      path: request.path.split("?")[0], // drop the query: it can hold reset tokens
+      path,
       method: request.method,
       route: context.routePath,
       routeType: context.routeType,
-      stack: error.stack,
+      stack: sensitive ? undefined : error.stack,
     }),
   );
 };
