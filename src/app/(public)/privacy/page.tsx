@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { aiEnabled } from "@/lib/features";
+import { aiEnabled, importEnabled } from "@/lib/features";
 import { SITE_NAME, supportEmail } from "@/lib/site";
 
 // Read SUPPORT_EMAIL at request time, not build time.
@@ -28,7 +28,7 @@ export default function PrivacyPage() {
       <Section title="What we store">
         <ul className="list-disc space-y-1 pl-5">
           <li>Your account: email address, optional name, and a salted hash of your password (never the password itself). These are held by our sign-in provider (Neon Auth).</li>
-          <li>What you add: applications, notes, contacts, status history, job descriptions, cover letters, and the resume files you upload.</li>
+          <li>What you add: applications, notes, contacts, status history, job descriptions, cover letters, the questions you save with your answers to them, and the resume files you upload.</li>
           <li>A session cookie that keeps you signed in. We don&apos;t use advertising or analytics cookies.</li>
           <li>Short-lived technical records used to limit abuse, such as how many times an IP address or email tried to sign in.</li>
         </ul>
@@ -39,6 +39,16 @@ export default function PrivacyPage() {
           When you ask for a cover letter draft, the job details, your instructions, and the
           text of the resume you select are sent to an AI model that we run ourselves. They
           are not sent to a third-party AI company, and we don&apos;t use your content to train models.
+        </Section>
+      )}
+
+      {importEnabled() && (
+        <Section title="Importing a job posting">
+          When you import a posting from a link, our servers fetch that public page, read the
+          job details and any application questions on it, and fill in the form for you to
+          review. A pasted posting or uploaded PDF is read the same way. We keep a short record
+          of each import (what was found, not the file) for up to 7 days so you can recover it,
+          then delete it.
         </Section>
       )}
 

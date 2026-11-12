@@ -122,7 +122,7 @@ Two kinds of data live in the same Neon Postgres database, in different schemas:
 | Where | What | Who owns it |
 | --- | --- | --- |
 | `neon_auth` schema | Users (email, name, password hash), sessions, verification codes | Neon Auth. The app never writes here |
-| `public` schema | `User` (just the Neon Auth user id), `Application`, `StatusEvent`, `Resume`, `RateLimit` | This app, via Prisma migrations |
+| `public` schema | `User` (just the Neon Auth user id), `Application`, `StatusEvent`, `Resume`, `Question`, `Answer`, `ApplicationQuestion`, `ImportJob`, `RateLimit` | This app, via Prisma migrations |
 | Object Storage bucket `resumes` | The resume files, keyed `{userId}/{uuid}` | This app, through one S3 credential |
 | Browser cookies | `__Secure-neon-auth.*`: the session token and a signed 60 s session cache | Set by the Neon Auth SDK |
 
@@ -133,6 +133,11 @@ erDiagram
     USER ||--o{ RESUME : owns
     RESUME |o--o{ APPLICATION : "attached to"
     APPLICATION ||--o{ STATUS_EVENT : "status history"
+    USER ||--o{ QUESTION : owns
+    QUESTION ||--o{ ANSWER : "variants"
+    APPLICATION ||--o{ APPLICATION_QUESTION : asks
+    QUESTION ||--o{ APPLICATION_QUESTION : "asked by"
+    ANSWER |o--o{ APPLICATION_QUESTION : "chosen for"
 
     NEON_AUTH_USER {
         uuid id PK
@@ -168,6 +173,24 @@ erDiagram
         text toStatus
         timestamp createdAt
     }
+    QUESTION {
+        text id PK
+        text text "as the person wrote it"
+        text textKey UK "with userId; case, spacing and punctuation folded"
+    }
+    ANSWER {
+        text id PK
+        text label "optional variant name"
+        text body
+        text source "MANUAL now; AI for drafts later"
+    }
+    APPLICATION_QUESTION {
+        text applicationId PK
+        text questionId PK
+        text answerId FK "set null when the variant is deleted"
+        text source "MANUAL or IMPORT"
+        int position
+    }
     RATE_LIMIT {
         text key PK
         timestamp windowStart PK
@@ -182,6 +205,26 @@ for space.)
 
 Deleting a `User` cascades to their applications, resumes and status history.
 Deleting a `Resume` keeps the applications that used it.
+
+**Questions.** A `Question` is something application forms ask ("Why do you
+want to work here?"). It belongs to one person, can be attached to many
+applications, and an application can have many questions (the
+`ApplicationQuestion` join table, which also records which `Answer` variant was
+chosen for that application). A question has any number of answer variants.
+Two spellings of one question ("Why us?" / "why us") resolve to a single row
+through `textKey`, so variants are never split. Deleting an application or a
+variant keeps the question; deleting a question removes it from every
+application; deleting an account removes all of it. `Answer.source` is the seam
+for drafting answers with the local model later (not built yet).
+
+**Finding questions when importing a posting.** The importer looks for the
+questions a posting's application asks and offers them to add (never adds them
+on its own): Greenhouse boards through Greenhouse's public board API, Lever
+postings through their apply page, and any other page through the labelled
+fields of a form that looks like an application. Contact and demographic
+fields are left out. It is best effort: sites that render their form with
+JavaScript (e.g. Ashby, Workday) show none, and a failure never fails the
+import.
 
 **Statuses:** `WISHLIST` → `APPLIED` → `SCREENING` → `INTERVIEWING` → `OFFER` →
 `ACCEPTED`, plus `REJECTED` and `WITHDRAWN`. An active application (applied,
@@ -323,6 +366,8 @@ npx playwright install chromium
 | `src/lib/rate-limit.ts` | Postgres-backed fixed-window limiter (no Redis) |
 | `src/lib/ai.ts` | Ollama client with a concurrency queue and timeouts |
 | `src/lib/features.ts` | Feature flags (`AI_ENABLED`) |
+| `src/lib/questions.ts`, `question-store.ts` | Question text rules, limits and form parsing; the store that attaches questions and variants to applications, always scoped to the owner |
+| `src/lib/import/` | Posting importer: safe fetcher, JSON-LD and PDF readers, question finders (`questions.ts`), import jobs and the queue seam |
 | `src/lib/storage.ts` | Resume storage (local disk or S3-compatible) and upload validation |
 | `src/lib/validation.ts`, `constants.ts` | Form schemas; limits such as the 4 MB resume cap |
 | `src/lib/file-type.ts`, `resume-text.ts` | Resume type sniffing from file bytes; text extraction (PDF, DOCX) for AI drafts |

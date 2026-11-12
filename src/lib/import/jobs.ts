@@ -2,6 +2,7 @@ import "server-only";
 import type { ImportJob } from "@prisma/client";
 import { db } from "@/lib/db";
 import { hasRequiredFields, mergeFields, sanitizeFields, type ImportFields } from "./fields";
+import { sanitizeQuestionList } from "@/lib/questions";
 import type { ImportKind } from "./prepare";
 
 /** A queued job nobody has answered in this long is given up on. */
@@ -18,6 +19,8 @@ export type ImportOutcome = {
   jobId: string;
   fields?: ImportFields;
   via?: ImportVia;
+  /** Application questions found on the posting. */
+  questions?: string[];
   /** Something worth telling the person, e.g. what couldn't be filled in. */
   notice?: string;
   error?: string;
@@ -64,6 +67,7 @@ export function createJob(args: {
   kind: ImportKind;
   sourceUrl?: string;
   fields: ImportFields;
+  questions?: string[];
   status: "QUEUED" | "DONE";
   result?: StoredResult;
 }) {
@@ -76,6 +80,7 @@ export function createJob(args: {
       // Set here, not by the database, so expiry compares like with like.
       createdAt: new Date(),
       fields: args.fields,
+      questions: args.questions?.length ? args.questions : undefined,
       result: args.result,
       finishedAt: args.status === "DONE" ? new Date() : undefined,
     },
@@ -99,9 +104,21 @@ export async function completeJob(jobId: string, extracted: unknown): Promise<bo
     via: "ai",
     ...(found ? {} : { notice: NOTICE_NOT_FOUND }),
   };
+  // Questions read from the page itself come first; the model adds what it saw.
+  const aiQuestions =
+    extracted && typeof extracted === "object" ? (extracted as { questions?: unknown }).questions : undefined;
+  const questions = sanitizeQuestionList([
+    ...sanitizeQuestionList(job.questions),
+    ...sanitizeQuestionList(aiQuestions),
+  ]);
   const { count } = await db.importJob.updateMany({
     where: { id: jobId, status: "QUEUED" },
-    data: { status: "DONE", result, finishedAt: new Date() },
+    data: {
+      status: "DONE",
+      result,
+      questions: questions.length ? questions : undefined,
+      finishedAt: new Date(),
+    },
   });
   return count === 1;
 }
@@ -118,6 +135,7 @@ export async function failJob(jobId: string, errorCode: string): Promise<boolean
 /** The shape the browser receives for a stored job. */
 export function outcomeFor(job: ImportJob): ImportOutcome {
   const known = sanitizeFields(job.fields);
+  const questions = sanitizeQuestionList(job.questions);
   switch (job.status) {
     case "DONE": {
       const result = job.result as StoredResult | null;
@@ -126,14 +144,15 @@ export function outcomeFor(job: ImportJob): ImportOutcome {
         jobId: job.id,
         fields: sanitizeFields(result?.fields ?? known),
         via: result?.via ?? "text",
+        questions,
         notice: result?.notice,
       };
     }
     case "QUEUED":
       return { status: "queued", jobId: job.id };
     case "EXPIRED":
-      return { status: "expired", jobId: job.id, fields: known, error: ERROR_EXPIRED };
+      return { status: "expired", jobId: job.id, fields: known, questions, error: ERROR_EXPIRED };
     default:
-      return { status: "failed", jobId: job.id, fields: known, error: ERROR_WORKER };
+      return { status: "failed", jobId: job.id, fields: known, questions, error: ERROR_WORKER };
   }
 }

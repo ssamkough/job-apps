@@ -10,6 +10,7 @@ import { SITE_NAME } from "@/lib/site";
 const items = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/applications", label: "Applications" },
+  { href: "/questions", label: "Questions" },
   { href: "/resumes", label: "Resumes" },
   { href: "/settings", label: "Settings" },
 ];

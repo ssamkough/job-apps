@@ -7,6 +7,7 @@ import {
 import { MAX_TEXT_CHARS, MIN_TEXT_CHARS, pageText, readJobPosting } from "./html";
 import { fetchPage, FetchError, type FetchFailure } from "./safe-fetch";
 import { readPostingPdf } from "./pdf";
+import { findQuestions } from "./questions";
 
 export type ImportKind = "URL" | "PDF" | "TEXT";
 
@@ -26,11 +27,19 @@ export type ImportErrorCode =
  *    (including the text as the description); an AI extractor may add more.
  */
 export type Prepared =
-  | { status: "complete"; kind: ImportKind; fields: ImportFields; sourceUrl?: string }
+  | {
+      status: "complete";
+      kind: ImportKind;
+      fields: ImportFields;
+      /** Application questions found on the posting (best effort). */
+      questions: string[];
+      sourceUrl?: string;
+    }
   | {
       status: "partial";
       kind: ImportKind;
       fields: ImportFields;
+      questions: string[];
       /** Cleaned text to hand to an extractor. Never persisted. */
       text: string;
       sourceUrl?: string;
@@ -46,10 +55,11 @@ function partial(
   text: string,
   known: ImportFields,
   sourceUrl?: string,
+  questions: string[] = [],
 ): Prepared {
   // The text itself is a sound job description even when nothing else is known.
   const fields = sanitizeFields({ jobDescription: text, ...known });
-  return { status: "partial", kind, fields, text, sourceUrl };
+  return { status: "partial", kind, fields, questions, text, sourceUrl };
 }
 
 export async function prepareFromUrl(url: string, options: PrepareOptions = {}): Promise<Prepared> {
@@ -60,6 +70,9 @@ export async function prepareFromUrl(url: string, options: PrepareOptions = {}):
     return { status: "error", code: e instanceof FetchError ? e.code : "unreachable" };
   }
 
+  // Best effort: never fails the import, and bounded by its own timeouts.
+  const questions = await findQuestions(page);
+
   const structured = readJobPosting(page.html, page.finalUrl);
   if (structured && hasRequiredFields(structured)) {
     // JSON-LD descriptions can be thin; fall back to the page text.
@@ -67,12 +80,18 @@ export async function prepareFromUrl(url: string, options: PrepareOptions = {}):
       const text = pageText(page.html, 20_000);
       if (text.length >= MIN_TEXT_CHARS) structured.jobDescription = text;
     }
-    return { status: "complete", kind: "URL", fields: sanitizeFields(structured), sourceUrl: page.finalUrl };
+    return {
+      status: "complete",
+      kind: "URL",
+      fields: sanitizeFields(structured),
+      questions,
+      sourceUrl: page.finalUrl,
+    };
   }
 
   const text = pageText(page.html);
   if (text.length < MIN_TEXT_CHARS) return { status: "error", code: "no_content" };
-  return partial("URL", text, { ...structured, jobUrl: page.finalUrl }, page.finalUrl);
+  return partial("URL", text, { ...structured, jobUrl: page.finalUrl }, page.finalUrl, questions);
 }
 
 export async function prepareFromPdf(file: File): Promise<Prepared> {

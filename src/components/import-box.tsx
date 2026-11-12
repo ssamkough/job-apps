@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button, Card, inputClass } from "@/components/ui";
+import { IMPORT_QUESTIONS_EVENT, IMPORT_QUESTIONS_UNDO_EVENT } from "@/components/questions-editor";
 import { IMPORT_FIELD_KEYS, type ImportFieldKey, type ImportFields } from "@/lib/import/fields";
 
 type Mode = "url" | "file" | "text";
@@ -10,6 +11,7 @@ type Outcome = {
   status: "done" | "queued" | "failed" | "expired";
   jobId: string;
   fields?: ImportFields;
+  questions?: string[];
   notice?: string;
   error?: string;
 };
@@ -75,6 +77,11 @@ export function ImportBox({
   const [notice, setNotice] = useState<string | null>(null);
   const [filled, setFilled] = useState<Filled[] | null>(null);
   const [kept, setKept] = useState<ImportFieldKey[]>([]);
+  // Application questions found on the posting, which ones are ticked, and
+  // which were added to the form (so they can be taken back).
+  const [found, setFound] = useState<string[]>([]);
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [added, setAdded] = useState<string[] | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const alive = useRef(true);
 
@@ -131,10 +138,33 @@ export function ImportBox({
     setNotice(null);
   }
 
+  function sendQuestions(type: string, questions: string[]) {
+    const form = document.getElementById(formId);
+    form?.dispatchEvent(new CustomEvent(type, { detail: { questions } }));
+  }
+
+  function addQuestions() {
+    const chosen = found.filter((q) => ticked.has(q));
+    if (chosen.length === 0) return;
+    sendQuestions(IMPORT_QUESTIONS_EVENT, chosen);
+    // `found` stays, so Undo can offer the whole list again.
+    setAdded(chosen);
+  }
+
+  function undoQuestions() {
+    if (!added) return;
+    sendQuestions(IMPORT_QUESTIONS_UNDO_EVENT, added);
+    setAdded(null);
+  }
+
   function finish(outcome: Outcome) {
     setBusy(false);
     setWaiting(false);
     if (outcome.fields) apply(outcome.fields);
+    const questions = outcome.questions ?? [];
+    setFound(questions);
+    setTicked(new Set(questions));
+    setAdded(null);
     if (outcome.status === "done") setNotice(outcome.notice ?? null);
     else setProblem(outcome.error ?? "Couldn't import that posting.");
   }
@@ -176,6 +206,8 @@ export function ImportBox({
     setNotice(null);
     setFilled(null);
     setKept([]);
+    setFound([]);
+    setAdded(null);
 
     const body = new FormData();
     if (mode === "url") body.set("url", url.trim());
@@ -301,6 +333,53 @@ export function ImportBox({
                 Undo
               </button>
             )}
+          </div>
+        )}
+        {found.length > 0 && !added && (
+          <fieldset className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3">
+            <legend className="px-1 text-sm font-medium text-zinc-900">
+              This application asks {found.length === 1 ? "a question" : `${found.length} questions`}
+            </legend>
+            <ul className="mt-1 space-y-1.5">
+              {found.map((q) => (
+                <li key={q}>
+                  <label className="flex items-start gap-2 text-zinc-800">
+                    <input
+                      type="checkbox"
+                      checked={ticked.has(q)}
+                      onChange={(e) =>
+                        setTicked((cur) => {
+                          const next = new Set(cur);
+                          if (e.target.checked) next.add(q);
+                          else next.delete(q);
+                          return next;
+                        })
+                      }
+                      className="mt-1 size-4 shrink-0 accent-indigo-700"
+                    />
+                    <span>{q}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-3">
+              <Button variant="secondary" onClick={addQuestions} disabled={ticked.size === 0}>
+                Attach selected to this application
+              </Button>
+            </div>
+          </fieldset>
+        )}
+        {added && (
+          <div
+            role="status"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800"
+          >
+            <span>
+              Attached {added.length === 1 ? "1 question" : `${added.length} questions`} to this application.
+            </span>
+            <button type="button" onClick={undoQuestions} aria-label="Undo attaching questions" className="font-medium underline">
+              Undo
+            </button>
           </div>
         )}
         {notice && <p className="text-zinc-600">{notice}</p>}

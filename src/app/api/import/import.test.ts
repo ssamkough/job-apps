@@ -462,3 +462,85 @@ describe("rate limits", () => {
     expect((await post({ text: LONG })).status).toBe(429);
   });
 });
+
+describe("application questions found on the posting", () => {
+  const FORM = `<form action="/apply"><input type="file" name="resume">
+    <label for="q1">Why do you want to join Globex?</label><textarea id="q1"></textarea>
+    <label for="q2">Email</label><input id="q2" type="email">
+    <button>Submit application</button></form>`;
+  const withForm = (html: string) => html.replace("</main>", `${FORM}</main>`);
+
+  it("returns them with a structured posting, and stores them with the job", async () => {
+    const user = await signIn();
+    h.fetchPage.mockResolvedValue({
+      html: withForm(
+        withLd({ title: "Platform Engineer", hiringOrganization: { name: "Globex" }, description: "<p>Run it.</p>" }),
+      ),
+      finalUrl: "https://boards.test/jobs/9",
+    });
+    const body = await (await post({ url: "https://boards.test/jobs/9" })).json();
+    expect(body).toMatchObject({ status: "done", via: "structured", questions: ["Why do you want to join Globex?"] });
+    const job = await db.importJob.findFirstOrThrow({ where: { userId: user.id } });
+    expect(job.questions).toEqual(["Why do you want to join Globex?"]);
+    // The status route gives the same answer back.
+    expect((await (await status(job.id)).json()).questions).toEqual(["Why do you want to join Globex?"]);
+  });
+
+  it("returns them with a text-only import too", async () => {
+    await signIn();
+    h.fetchPage.mockResolvedValue({ html: withForm(PLAIN), finalUrl: "https://careers.test/p" });
+    const body = await (await post({ url: "https://careers.test/p" })).json();
+    expect(body).toMatchObject({ via: "text", questions: ["Why do you want to join Globex?"] });
+  });
+
+  it("returns an empty list when there are none, and for text and PDF imports", async () => {
+    await signIn();
+    h.fetchPage.mockResolvedValue({ html: PLAIN, finalUrl: "https://careers.test/p" });
+    expect((await (await post({ url: "https://careers.test/p" })).json()).questions).toEqual([]);
+    expect((await (await post({ text: LONG })).json()).questions).toEqual([]);
+  });
+
+  it("keeps them through the worker, adding what the model saw (cleaned)", async () => {
+    vi.stubEnv("AI_IMPORT_ENABLED", "true");
+    setImportQueue(fakeQueue);
+    const user = await signIn();
+    h.fetchPage.mockResolvedValue({ html: withForm(PLAIN), finalUrl: "https://careers.test/p" });
+    const { jobId } = await (await post({ url: "https://careers.test/p" })).json();
+    expect(
+      await completeJob(jobId, {
+        company: "Globex",
+        jobTitle: "Platform Engineer",
+        questions: [
+          "why do you want to join globex",
+          "Describe a hard bug you fixed.",
+          "Email",
+          42,
+          "Describe a hard bug you fixed. *",
+        ],
+      }),
+    ).toBe(true);
+    const done = await (await status(jobId)).json();
+    expect(done.questions).toEqual(["Why do you want to join Globex?", "Describe a hard bug you fixed."]);
+    expect((await db.importJob.findFirstOrThrow({ where: { userId: user.id } })).questions).toEqual(done.questions);
+  });
+
+  it("ignores a model answer whose questions aren't a list", async () => {
+    vi.stubEnv("AI_IMPORT_ENABLED", "true");
+    setImportQueue(fakeQueue);
+    await signIn();
+    h.fetchPage.mockResolvedValue({ html: PLAIN, finalUrl: "https://careers.test/p" });
+    const { jobId } = await (await post({ url: "https://careers.test/p" })).json();
+    await completeJob(jobId, { company: "Globex", jobTitle: "Eng", questions: "everything" });
+    expect((await (await status(jobId)).json()).questions).toEqual([]);
+  });
+
+  it("still returns the questions when the worker fails", async () => {
+    vi.stubEnv("AI_IMPORT_ENABLED", "true");
+    setImportQueue(fakeQueue);
+    await signIn();
+    h.fetchPage.mockResolvedValue({ html: withForm(PLAIN), finalUrl: "https://careers.test/p" });
+    const { jobId } = await (await post({ url: "https://careers.test/p" })).json();
+    await failJob(jobId, "worker_error");
+    expect((await (await status(jobId)).json()).questions).toEqual(["Why do you want to join Globex?"]);
+  });
+});

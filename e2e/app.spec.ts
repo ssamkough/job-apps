@@ -359,7 +359,11 @@ test.describe("desktop journey", () => {
 
     // Inline status change persists across reloads.
     const select = page.locator('select[aria-label="Status for Globex"]:visible');
-    await select.selectOption("APPLIED");
+    // Wait for the save itself: reloading while it is in flight would cancel it.
+    await Promise.all([
+      page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/applications")),
+      select.selectOption("APPLIED"),
+    ]);
     await expect(select).toHaveValue("APPLIED");
     await page.reload();
     await expect(page.locator('select[aria-label="Status for Globex"]:visible')).toHaveValue("APPLIED");
@@ -418,6 +422,130 @@ test.describe("desktop journey", () => {
     await expect(page.getByLabel("Cover letter")).toHaveValue(/MOCK COVER LETTER BODY/);
   });
 
+  test("questions: build a library with variants, attach to an application, choose a variant, copy it", async () => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+
+    // A question with a first variant, then a second variant.
+    await page.goto("/questions");
+    await expect(page.getByText("No questions yet")).toBeVisible();
+    await page.getByLabel("Question", { exact: true }).fill("Why do you want to work here?");
+    await page.getByText("Add a first answer (optional)").click();
+    await page.locator("#new-answer-label").fill("Short");
+    await page.locator("#new-answer-body").fill("I like the product and the team.");
+    await page.getByRole("button", { name: "Add question" }).click();
+    await expect(page).toHaveURL(/\/questions\/[^/]+$/);
+    await expect(page.getByRole("heading", { name: "Answers (1)" })).toBeVisible();
+    await page.locator("#new-answer-label").fill("Long");
+    await page.locator("#new-answer-body").fill("A longer answer about the product, the team and the mission.");
+    await page.getByRole("button", { name: "Add answer" }).click();
+    await expect(page.getByRole("heading", { name: "Answers (2)" })).toBeVisible();
+
+    // The same question typed differently is a duplicate, not a second question.
+    await page.goto("/questions");
+    await page.getByLabel("Question", { exact: true }).fill("  why do you WANT to work here ");
+    await page.getByRole("button", { name: "Add question" }).click();
+    await expect(page.getByText("You already have this question.")).toBeVisible();
+
+    // Attach it to an application and pick the long variant; add a brand-new question too.
+    await page.goto("/applications");
+    await page.getByRole("link", { name: /Acme Corporation/ }).first().click();
+    const questions = page.getByRole("heading", { name: "Application questions" });
+    await expect(questions).toBeVisible();
+    await page.getByLabel("Add one of your saved questions").selectOption({ index: 1 });
+    await page.getByRole("button", { name: "Attach", exact: true }).click();
+    await page.getByLabel(/^Answer to use for/).selectOption({ index: 2 });
+    const typed = page.getByLabel("Type a new question");
+    await typed.fill("What is your biggest weakness?");
+    await typed.press("Enter"); // adds the question; must not submit the application
+    await expect(page.getByText("What is your biggest weakness?")).toBeVisible();
+    await expect(page).toHaveURL(/\/applications\/[^/]+$/);
+    await Promise.all([
+      page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/applications/")),
+      page.getByRole("button", { name: /^Save/ }).click(),
+    ]);
+    await expect(page.getByText("Saved.")).toBeVisible();
+
+    // It all persisted, and the chosen answer is there to read and copy.
+    await page.reload();
+    await expect(page.getByLabel(/^Answer to use for: Why do you want/)).not.toHaveValue("");
+    await expect(page.getByText("What is your biggest weakness?").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Your answers" })).toBeVisible();
+    await expect(page.locator("p", { hasText: "A longer answer about the product, the team and the mission." })).toBeVisible();
+    await page.getByRole("button", { name: "Copy answer" }).click();
+    await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+      "A longer answer about the product, the team and the mission.",
+    );
+
+    // The library shows where each question is used.
+    await page.goto("/questions");
+    await expect(page.getByRole("link", { name: /Why do you want to work here\?/ })).toContainText("2 answers");
+    await expect(page.getByRole("link", { name: /Why do you want to work here\?/ })).toContainText("Used in 1 application");
+    await expect(page.getByRole("link", { name: /What is your biggest weakness\?/ })).toContainText("No answers yet");
+
+    // Deleting the chosen variant keeps the question on the application, minus the choice.
+    await page.getByRole("link", { name: /Why do you want to work here\?/ }).click();
+    const variant = page.locator("form", { has: page.locator('input[name="label"][value="Long"]') });
+    page.once("dialog", (d) => d.accept());
+    await variant.getByRole("button", { name: "Delete" }).click();
+    await expect(page.getByRole("heading", { name: "Answers (1)" })).toBeVisible();
+    await page.goto("/applications");
+    await page.getByRole("link", { name: /Acme Corporation/ }).first().click();
+    await expect(page.getByText("Why do you want to work here?").first()).toBeVisible();
+    await expect(page.getByLabel(/^Answer to use for: Why do you want/)).toHaveValue("");
+    await expect(page.getByRole("button", { name: "Copy answer" })).toHaveCount(0);
+  });
+
+  test("questions found on a posting are offered, can be picked, added and undone", async ({ browser }) => {
+    // The page fetch itself is covered by unit tests (the importer only fetches public ports);
+    // here the importer's answer is faked so the browser flow can be checked.
+    const ctx = await browser.newContext({
+      storageState: await page.context().storageState(),
+      extraHTTPHeaders: ip("10.0.0.1"),
+    });
+    const p = await ctx.newPage();
+    const problemsHere = watch(p);
+    await p.route("**/api/import", (route) =>
+      route.fulfill({
+        json: {
+          status: "done",
+          jobId: "fake",
+          via: "structured",
+          fields: { company: "Hooli", jobTitle: "Engineer" },
+          questions: ["Why Hooli?", "What is your biggest weakness?", "Describe a hard bug you fixed."],
+        },
+      }),
+    );
+    await p.goto("/applications/new");
+    const box = p.getByTestId("import-box");
+    await box.getByRole("tab", { name: "Paste text" }).click();
+    await box.getByLabel("Job posting text").fill("A posting.");
+    await box.getByRole("button", { name: "Import" }).click();
+
+    await expect(box.getByRole("group", { name: "This application asks 3 questions" })).toBeVisible();
+    await box.getByLabel("Describe a hard bug you fixed.").uncheck();
+    await box.getByRole("button", { name: "Attach selected to this application" }).click();
+    await expect(box.getByRole("status").filter({ hasText: "Attached 2 questions" })).toBeVisible();
+
+    const list = p.getByRole("list", { name: "Application questions" });
+    await expect(list.getByRole("listitem")).toHaveCount(2);
+    await expect(list).toContainText("Why Hooli?");
+    // One of them is already in the library from the previous test, so it isn't "new".
+    await expect(list.getByText("Found on the posting")).toHaveCount(1);
+    await expect(list).not.toContainText("Describe a hard bug");
+
+    await box.getByRole("button", { name: "Undo attaching questions" }).click();
+    await expect(list).toHaveCount(0);
+    await expect(box.getByLabel("Describe a hard bug you fixed.")).toBeVisible();
+
+    // A question can also be taken off by hand.
+    await box.getByRole("button", { name: "Attach selected to this application" }).click();
+    await p.getByRole("button", { name: "Remove question: Why Hooli?" }).click();
+    await expect(p.getByRole("list", { name: "Application questions" }).getByRole("listitem")).toHaveCount(1);
+    expect(problemsHere).toEqual([]);
+    await ctx.close();
+  });
+
   test("resume library: upload DOCX, attach, delete keeps the application", async () => {
     await page.goto("/resumes");
     await page.getByLabel("Label (optional)").fill("Design resume");
@@ -459,7 +587,9 @@ test.describe("desktop journey", () => {
   test("accessibility: no WCAG A/AA violations on the main screens", async () => {
     await page.goto("/applications");
     const detail = await page.locator('a[href^="/applications/"]:not([href="/applications/new"])').first().getAttribute("href");
-    const paths = ["/dashboard", "/applications", "/applications/new", detail!, `${detail}/edit`, "/resumes", "/settings"];
+    await page.goto("/questions");
+    const question = await page.locator('a[href^="/questions/"]').first().getAttribute("href");
+    const paths = ["/dashboard", "/applications", "/applications/new", detail!, `${detail}/edit`, "/resumes", "/settings", "/questions", question!];
     const found: string[] = [];
     for (const path of paths) {
       await page.goto(path);
@@ -806,10 +936,21 @@ test.describe("mobile layout @mobile", () => {
     await page.getByRole("button", { name: /^(Save|Add|Create)/ }).click();
     await expect(page).toHaveURL(/saved=1/);
 
+    // A question with a long text and a long variant, to check wrapping.
+    await page.goto("/questions");
+    await page.getByLabel("Question", { exact: true }).fill("Describe, in as much detail as you are comfortable with, " + "a project you led. ".repeat(6));
+    await page.getByText("Add a first answer (optional)").click();
+    await page.locator("#new-answer-body").fill("Averyveryverylongwordwithoutspaces".repeat(4) + " and more text. ".repeat(30));
+    await page.getByRole("button", { name: "Add question" }).click();
+    await expect(page).toHaveURL(/\/questions\/[^/]+$/);
+    const questionPath = new URL(page.url()).pathname;
+
     const screens: Record<string, string> = {
       dashboard: "/dashboard",
       applications: "/applications",
       "application-new": "/applications/new",
+      questions: "/questions",
+      "question-detail": questionPath,
       resumes: "/resumes",
       settings: "/settings",
       privacy: "/privacy",

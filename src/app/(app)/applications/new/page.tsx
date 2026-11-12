@@ -5,6 +5,7 @@ import { createApplication } from "@/app/actions/applications";
 import { aiEnabled, importAiEnabled, importEnabled } from "@/lib/features";
 import { todayDateInput } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
+import { loadQuestionLibrary } from "@/lib/question-store";
 import { ImportBox } from "@/components/import-box";
 import {
   ApplicationForm,
@@ -33,11 +34,14 @@ const empty: ApplicationFormValues = {
 
 export default async function NewApplicationPage() {
   const user = await requireUser();
-  const resumes = await db.resume.findMany({
-    where: { userId: user.id },
-    orderBy: { createdAt: "desc" },
-    select: { id: true, label: true, fileName: true },
-  });
+  const [resumes, library] = await Promise.all([
+    db.resume.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, label: true, fileName: true },
+    }),
+    loadQuestionLibrary(user.id),
+  ]);
 
   return (
     <>
@@ -53,6 +57,7 @@ export default async function NewApplicationPage() {
         action={createApplication}
         initial={{ ...empty, dateApplied: todayDateInput() }}
         resumes={resumes}
+        library={library}
         aiEnabled={aiEnabled()}
         submitLabel="Add application"
       />

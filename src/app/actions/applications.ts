@@ -7,6 +7,8 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { isStatus } from "@/lib/constants";
 import { applicationSchema, fieldErrors } from "@/lib/validation";
+import { parseAttachments, type Attachment } from "@/lib/questions";
+import { setApplicationQuestions, wouldExceedLimit } from "@/lib/question-store";
 import { formValues, type FormState } from "@/lib/form-state";
 import {
   deleteResumeFile,
@@ -25,6 +27,8 @@ type Prepared =
       error?: undefined;
       data: z.output<typeof applicationSchema>;
       upload: ResumeUpload | null;
+      /** The form's question list, or null when the form didn't send one. */
+      questions: Attachment[] | null;
     };
 
 async function prepare(userId: string, formData: FormData): Promise<Prepared> {
@@ -32,6 +36,21 @@ async function prepare(userId: string, formData: FormData): Promise<Prepared> {
   const parsed = applicationSchema.safeParse(raw);
   if (!parsed.success) {
     return { error: { errors: fieldErrors(parsed.error), values: raw } };
+  }
+
+  let questions: Attachment[] | null = null;
+  if (raw.questions !== undefined) {
+    const list = parseAttachments(raw.questions);
+    if (!list.ok) return { error: { errors: { questions: list.error }, values: raw } };
+    if (await wouldExceedLimit(userId, list.items)) {
+      return {
+        error: {
+          errors: { questions: "You've reached the limit of saved questions. Delete some first." },
+          values: raw,
+        },
+      };
+    }
+    questions = list.items;
   }
 
   let upload: ResumeUpload | null = null;
@@ -59,7 +78,7 @@ async function prepare(userId: string, formData: FormData): Promise<Prepared> {
     }
   }
 
-  return { data: parsed.data, upload };
+  return { data: parsed.data, upload, questions };
 }
 
 async function storeUpload(userId: string, file: ResumeUpload) {
@@ -90,18 +109,22 @@ export async function createApplication(
   const result = await prepare(user.id, formData);
   if (result.error) return result.error;
 
-  const { data, upload } = result;
+  const { data, upload, questions } = result;
   const resumeId = upload
     ? await storeUpload(user.id, upload)
     : (data.resumeId ?? null);
 
-  const app = await db.application.create({
-    data: {
-      ...data,
-      userId: user.id,
-      resumeId,
-      events: { create: { fromStatus: null, toStatus: data.status } },
-    },
+  const app = await db.$transaction(async (tx) => {
+    const created = await tx.application.create({
+      data: {
+        ...data,
+        userId: user.id,
+        resumeId,
+        events: { create: { fromStatus: null, toStatus: data.status } },
+      },
+    });
+    if (questions?.length) await setApplicationQuestions(tx, user.id, created.id, questions);
+    return created;
   });
 
   revalidatePath("/", "layout");
@@ -124,7 +147,7 @@ export async function updateApplication(
   const result = await prepare(user.id, formData);
   if (result.error) return result.error;
 
-  const { data, upload } = result;
+  const { data, upload, questions } = result;
   const resumeId = upload
     ? await storeUpload(user.id, upload)
     : (data.resumeId ?? null);
@@ -139,16 +162,20 @@ export async function updateApplication(
 
   // `userId` in the filter as well as the earlier ownership check: a row that
   // is not the caller's can never be written, even if this code is refactored.
-  await db.application.update({
-    where: { id, userId: user.id },
-    data: {
-      ...columns,
-      resumeId,
-      ...(statusChanged && {
-        statusUpdatedAt: new Date(),
-        events: { create: { fromStatus: existing.status, toStatus: data.status } },
-      }),
-    },
+  await db.$transaction(async (tx) => {
+    await tx.application.update({
+      where: { id, userId: user.id },
+      data: {
+        ...columns,
+        resumeId,
+        ...(statusChanged && {
+          statusUpdatedAt: new Date(),
+          events: { create: { fromStatus: existing.status, toStatus: data.status } },
+        }),
+      },
+    });
+    // Only touch the list when the form sent one (an empty list clears it).
+    if (questions) await setApplicationQuestions(tx, user.id, id, questions);
   });
 
   revalidatePath("/", "layout");

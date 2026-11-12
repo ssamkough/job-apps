@@ -96,7 +96,10 @@ needed for that switch.
 4. Apply the migrations (below).
 
 **Migrations.** Migrations live in `prisma/migrations/` (`20261110184526_init`,
-`20261110235900_neon_auth_slim_user`). `migrate deploy` only touches the app's
+`20261110235900_neon_auth_slim_user`, then `20261111120000_import_job` and
+`20261112150000_questions`, which are **not applied to production yet**: apply
+them, following "Future schema changes" below, **before** deploying code that
+saves applications, because saving an application now writes question rows). `migrate deploy` only touches the app's
 tables in `public`; it never touches `neon_auth`. Apply them from a laptop with
 the **direct** string in a gitignored file (`.env*` is ignored), then delete the
 file. Never use the pooled URL.

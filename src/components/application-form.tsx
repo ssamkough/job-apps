@@ -13,6 +13,7 @@ import {
 import { Card, Field, buttonClass, inputClass } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { CoverLetterEditor } from "@/components/cover-letter-editor";
+import { QuestionsEditor, type EditorItem, type LibraryOption } from "@/components/questions-editor";
 
 export type ApplicationFormValues = {
   company: string;
@@ -44,6 +45,8 @@ export function ApplicationForm({
   submitLabel,
   saved,
   id,
+  library = [],
+  initialQuestions = [],
 }: {
   action: (prev: FormState, formData: FormData) => Promise<FormState>;
   initial: ApplicationFormValues;
@@ -53,6 +56,10 @@ export function ApplicationForm({
   saved?: boolean;
   /** DOM id, so something outside the form (the importer) can find it. */
   id?: string;
+  /** The person's saved questions, for the questions picker. */
+  library?: LibraryOption[];
+  /** Questions already attached to this application. */
+  initialQuestions?: EditorItem[];
 }) {
   const [state, formAction] = useActionState(action, initialState);
   const err = state.errors ?? {};
@@ -188,6 +195,10 @@ export function ApplicationForm({
                 />
               </Field>
             </div>
+          </Card>
+
+          <Card className="p-5">
+            <QuestionsEditor library={library} initial={initialQuestions} error={err.questions} />
           </Card>
 
           <Card className="p-5">

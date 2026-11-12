@@ -15,6 +15,8 @@ import { ApplicationForm } from "@/components/application-form";
 import { aiEnabled } from "@/lib/features";
 import { DeleteButton } from "@/components/delete-button";
 import { LocalTime } from "@/components/local-time";
+import { CopyButton } from "@/components/question-forms";
+import { loadApplicationQuestions, loadQuestionLibrary } from "@/lib/question-store";
 
 export const metadata: Metadata = { title: "Application" };
 
@@ -29,7 +31,7 @@ export default async function ApplicationPage({
   const { id } = await params;
   const { saved } = await searchParams;
 
-  const [app, resumes] = await Promise.all([
+  const [app, resumes, library, attached] = await Promise.all([
     db.application.findFirst({
       where: { id, userId: user.id },
       include: {
@@ -42,8 +44,21 @@ export default async function ApplicationPage({
       orderBy: { createdAt: "desc" },
       select: { id: true, label: true, fileName: true },
     }),
+    loadQuestionLibrary(user.id),
+    loadApplicationQuestions(user.id, id),
   ]);
   if (!app) notFound();
+
+  // The chosen answers in full, for reading and copying below the form.
+  const chosenIds = attached.map((q) => q.answerId).filter((a): a is string => !!a);
+  const chosen = new Map(
+    (
+      await db.answer.findMany({
+        where: { id: { in: chosenIds }, question: { userId: user.id } },
+        select: { id: true, label: true, body: true },
+      })
+    ).map((a) => [a.id, a]),
+  );
 
   return (
     <>
@@ -105,10 +120,43 @@ export default async function ApplicationPage({
           resumeId: app.resumeId ?? "",
         }}
         resumes={resumes}
+        library={library}
+        initialQuestions={attached.map((q) => ({
+          questionId: q.questionId,
+          text: q.text,
+          answerId: q.answerId,
+          source: q.source === "IMPORT" ? "IMPORT" : "MANUAL",
+        }))}
         aiEnabled={aiEnabled()}
         submitLabel="Save changes"
         saved={saved === "1"}
       />
+
+      {attached.some((q) => q.answerId && chosen.has(q.answerId)) && (
+        <Card className="mt-6 p-5">
+          <h2 className="mb-4 text-sm font-semibold text-zinc-900">Your answers</h2>
+          <ul className="space-y-5">
+            {attached.map((q) => {
+              const answer = q.answerId ? chosen.get(q.answerId) : undefined;
+              if (!answer) return null;
+              return (
+                <li key={q.questionId}>
+                  <div className="flex items-start justify-between gap-3">
+                    <h3 className="text-sm font-medium text-zinc-900">
+                      <Link href={`/questions/${q.questionId}`} className="hover:underline">
+                        {q.text}
+                      </Link>
+                    </h3>
+                    <CopyButton text={answer.body} label="Copy answer" />
+                  </div>
+                  {answer.label && <p className="mt-1 text-xs text-zinc-500">{answer.label}</p>}
+                  <p className="mt-2 whitespace-pre-wrap text-sm text-zinc-700">{answer.body}</p>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="p-5 lg:col-span-2">

@@ -23,6 +23,7 @@ model User {
   applications Application[]
   resumes      Resume[]
   importJobs   ImportJob[]
+  questions    Question[]
 }
 
 // Fixed-window counters for rate limiting, kept in Postgres so no Redis is
@@ -82,6 +83,7 @@ model Application {
   user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   resume          Resume?       @relation(fields: [resumeId], references: [id], onDelete: SetNull)
   events          StatusEvent[]
+  questions       ApplicationQuestion[]
 
   @@index([userId, status])
   @@index([userId, dateApplied])
@@ -111,6 +113,8 @@ model ImportJob {
   status     String    @default("QUEUED")
   fields     Json?
   result     Json?
+  // Application questions found on the posting (list of strings), if any.
+  questions  Json?
   errorCode  String?
   createdAt  DateTime  @default(now())
   finishedAt DateTime?
@@ -118,4 +122,62 @@ model ImportJob {
 
   @@index([userId, createdAt])
   @@index([userId, status])
+}
+
+// A question the user has met on job applications ("Why do you want to work
+// here?"). One row per distinct question per user, shared by every application
+// that asks it. `textKey` is the normalised text, so the same question found on
+// two postings (or typed twice) resolves to one row. See src/lib/questions.ts.
+model Question {
+  id           String                @id @default(cuid())
+  userId       String
+  text         String
+  textKey      String
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers      Answer[]
+  applications ApplicationQuestion[]
+
+  @@unique([userId, textKey])
+  @@index([userId])
+}
+
+// One way of answering a question (a variant): short, long, tailored to a kind
+// of role... `source` is MANUAL for everything written by hand; the planned
+// local-AI drafting will write AI variants that the person can edit.
+model Answer {
+  id         String                @id @default(cuid())
+  questionId String
+  // Optional name for the variant, e.g. "Short" or "Startup version".
+  label      String?
+  body       String
+  // MANUAL | AI
+  source     String                @default("MANUAL")
+  createdAt  DateTime              @default(now())
+  updatedAt  DateTime              @updatedAt
+  question   Question              @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  usedBy     ApplicationQuestion[]
+
+  @@index([questionId])
+}
+
+// Links an application to a question it asks, and records which variant was
+// (or will be) used there. Deleting a variant keeps the link and clears the
+// choice; deleting either side removes the link.
+model ApplicationQuestion {
+  applicationId String
+  questionId    String
+  answerId      String?
+  // MANUAL | IMPORT (found on the posting by the importer)
+  source        String      @default("MANUAL")
+  position      Int         @default(0)
+  createdAt     DateTime    @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  question      Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  answer        Answer?     @relation(fields: [answerId], references: [id], onDelete: SetNull)
+
+  @@id([applicationId, questionId])
+  @@index([questionId])
+  @@index([answerId])
 }

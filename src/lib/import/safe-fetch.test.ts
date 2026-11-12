@@ -2,7 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import zlib from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { FetchError, fetchPage, parsePublicUrl } from "./safe-fetch";
+import { FetchError, fetchJson, fetchPage, parsePublicUrl } from "./safe-fetch";
 
 let server: http.Server;
 let base: string;
@@ -35,6 +35,14 @@ beforeAll(async () => {
     if (url === "/json") {
       res.setHeader("content-type", "application/json");
       return res.end("{}");
+    }
+    if (url === "/json-data") {
+      res.setHeader("content-type", "application/json; charset=utf-8");
+      return res.end('{"questions":[{"label":"Why?"}]}');
+    }
+    if (url === "/json-bad") {
+      res.setHeader("content-type", "application/json");
+      return res.end("{nope");
     }
     if (url === "/404") {
       res.statusCode = 404;
@@ -187,5 +195,22 @@ describe("fetchPage reading", () => {
   it("reports an unreachable host", async () => {
     // Any other loopback port stays blocked even with the exemption.
     expect(await code(fetchPage("http://127.0.0.1:1/", local))).toBe("blocked");
+  });
+});
+
+describe("fetchJson", () => {
+  it("reads a JSON document", async () => {
+    expect(await fetchJson(`${base}/json-data`, local)).toEqual({ questions: [{ label: "Why?" }] });
+  });
+  it("refuses a page that isn't JSON, and invalid JSON", async () => {
+    await expect(fetchJson(`${base}/ok`, local)).rejects.toMatchObject({ code: "not_html" });
+    await expect(fetchJson(`${base}/json-bad`, local)).rejects.toMatchObject({ code: "not_html" });
+  });
+  it("keeps every other guard", async () => {
+    await expect(fetchJson("http://169.254.169.254/x")).rejects.toMatchObject({ code: "blocked" });
+    await expect(fetchJson(`${base}/404`, local)).rejects.toMatchObject({ code: "http_error" });
+  });
+  it("still refuses JSON where a page is expected", async () => {
+    await expect(fetchPage(`${base}/json-data`, local)).rejects.toMatchObject({ code: "not_html" });
   });
 });

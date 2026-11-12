@@ -91,6 +91,7 @@ export async function POST(req: Request) {
       kind: prepared.kind,
       sourceUrl: prepared.sourceUrl,
       fields: prepared.fields,
+      questions: prepared.questions,
       status: "DONE",
       result: { fields: prepared.fields, via: "structured" },
     });
@@ -111,6 +112,7 @@ export async function POST(req: Request) {
         kind: prepared.kind,
         sourceUrl: prepared.sourceUrl,
         fields: prepared.fields,
+        questions: prepared.questions,
         status: "QUEUED",
       });
       try {
@@ -134,6 +136,7 @@ export async function POST(req: Request) {
     kind: prepared.kind,
     sourceUrl: prepared.sourceUrl,
     fields: prepared.fields,
+    questions: prepared.questions,
     status: "DONE",
     result: { fields: prepared.fields, via: "text", notice },
   });

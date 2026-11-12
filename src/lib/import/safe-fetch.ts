@@ -19,7 +19,7 @@ export type FetchFailure =
   | "too_large"
   | "too_many_redirects"
   | "http_error" // 4xx / 5xx from the site
-  | "not_html"; // not a web page
+  | "not_html"; // not a web page (or, for JSON requests, not JSON)
 
 export class FetchError extends Error {
   constructor(
@@ -31,6 +31,8 @@ export class FetchError extends Error {
 }
 
 export type FetchedPage = { html: string; finalUrl: string };
+
+export type ContentKind = "html" | "json";
 
 type Options = {
   /**
@@ -94,7 +96,7 @@ function guardedLookup(allowPrivate: boolean): net.LookupFunction {
 }
 
 /** One request, no redirect following. Resolves with the response stream. */
-function request(url: URL, exempt: boolean, signal: AbortSignal) {
+function request(url: URL, exempt: boolean, signal: AbortSignal, kind: ContentKind) {
   return new Promise<http.IncomingMessage>((resolve, reject) => {
     const host = url.hostname.replace(/^\[|\]$/g, "");
     // IP literals skip DNS, so they need checking up front.
@@ -110,7 +112,10 @@ function request(url: URL, exempt: boolean, signal: AbortSignal) {
         signal,
         headers: {
           "user-agent": "Mozilla/5.0 (compatible; JobAppsImport/1.0)",
-          accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
+          accept:
+            kind === "json"
+              ? "application/json"
+              : "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5",
           "accept-encoding": "gzip, deflate, br",
           "accept-language": "en",
         },
@@ -160,12 +165,17 @@ function toFetchError(e: unknown): FetchError {
 }
 
 /**
- * Fetches a public web page for import. Guards: http(s) on 80/443 only; every
+ * Fetches a public web page for import (or, with `kind: "json"`, a JSON
+ * document). Guards: http(s) on 80/443 only; every
  * connection goes only to public addresses (checked at connect time, redirects
  * included); at most 3 redirects, each re-validated; 8 s overall; 2 MB after
  * decompression; HTML content types only.
  */
-export async function fetchPage(rawUrl: string, options: Options = {}): Promise<FetchedPage> {
+async function fetchText(
+  rawUrl: string,
+  options: Options,
+  kind: ContentKind,
+): Promise<FetchedPage> {
   const loopbackPort = options.testLoopbackPort;
   const maxBytes = options.maxBytes ?? FETCH_MAX_BYTES;
   const timeout = AbortSignal.timeout(options.timeoutMs ?? FETCH_TIMEOUT_MS);
@@ -173,7 +183,7 @@ export async function fetchPage(rawUrl: string, options: Options = {}): Promise<
   try {
     let url = parsePublicUrl(rawUrl, loopbackPort);
     for (let hop = 0; hop <= FETCH_MAX_REDIRECTS; hop++) {
-      const res = await request(url, isTestLoopback(url, loopbackPort), timeout);
+      const res = await request(url, isTestLoopback(url, loopbackPort), timeout, kind);
       const status = res.statusCode ?? 0;
 
       if (status >= 300 && status < 400 && res.headers.location) {
@@ -196,7 +206,11 @@ export async function fetchPage(rawUrl: string, options: Options = {}): Promise<
       }
 
       const type = String(res.headers["content-type"] ?? "").toLowerCase();
-      if (!/\b(text\/html|application\/xhtml\+xml)\b/.test(type)) {
+      const wanted =
+        kind === "json"
+          ? /\b(application\/json|[\w.+-]+\+json)\b/
+          : /\b(text\/html|application\/xhtml\+xml)\b/;
+      if (!wanted.test(type)) {
         res.resume();
         throw new FetchError("not_html");
       }
@@ -219,5 +233,19 @@ export async function fetchPage(rawUrl: string, options: Options = {}): Promise<
     throw new FetchError("too_many_redirects");
   } catch (e) {
     throw toFetchError(e);
+  }
+}
+
+export function fetchPage(rawUrl: string, options: Options = {}): Promise<FetchedPage> {
+  return fetchText(rawUrl, options, "html");
+}
+
+/** Same guards as `fetchPage`, for a JSON document. Returns the parsed value. */
+export async function fetchJson(rawUrl: string, options: Options = {}): Promise<unknown> {
+  const { html } = await fetchText(rawUrl, options, "json");
+  try {
+    return JSON.parse(html);
+  } catch {
+    throw new FetchError("not_html");
   }
 }
