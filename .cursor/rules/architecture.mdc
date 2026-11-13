@@ -30,6 +30,14 @@ Any change to how the system is built or wired, not just the importer:
 4. **Render check**: keep node labels in quotes, no stray `(` or `;` outside
    quotes. Every `mermaid` block must parse.
 
+## The README overlaps
+
+The README's "How it works" section has its own diagrams (the pieces, sign-up
+and sessions, resume upload, the data model) and a services table. They must
+agree with this doc. When a change touches something drawn in both, update both
+in the same commit; if the README's version would only repeat this doc, replace
+it with a link instead of keeping two copies.
+
 ## Before finishing a task
 
 Re-read the diagrams against the code you touched. If a box, arrow or number no
