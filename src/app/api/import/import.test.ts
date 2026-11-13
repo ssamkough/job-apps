@@ -158,6 +158,47 @@ describe("a posting with structured data", () => {
   });
 });
 
+describe("descriptions", () => {
+  it("keeps the posting's own description instead of the page text", async () => {
+    await signIn();
+    h.fetchPage.mockResolvedValue({
+      // A title but no company, so this takes the text path, where the page text is on hand.
+      html: withLd({ title: "Platform Engineer", description: "<p>The posting's own description.</p>" }),
+      finalUrl: "https://boards.test/d",
+    });
+    const body = await (await post({ url: "https://boards.test/d" })).json();
+    expect(body.fields.jobDescription).toBe("The posting's own description.");
+  });
+
+  it("drops cookie banners and Apply buttons from a page-text description", async () => {
+    await signIn();
+    h.fetchPage.mockResolvedValue({
+      html: `<!DOCTYPE html><html><head><title>Platform Engineer at Globex</title></head><body>
+        <div id="cookie-banner"><p>We use cookies to improve your experience.</p><button>Accept all</button></div>
+        <div><h2>Platform Engineer at Globex</h2><button>Apply now</button><p>${LONG}</p><p>Share this job</p></div>
+        </body></html>`,
+      finalUrl: "https://careers.test/clean",
+    });
+    const body = await (await post({ url: "https://careers.test/clean" })).json();
+    expect(body.fields.jobDescription).toContain("platform engineer");
+    expect(body.fields.jobDescription).not.toMatch(/cookies|Accept all|Apply now|Share this job|doctype/i);
+  });
+
+  it("cuts an overlong page-text description at a paragraph boundary", async () => {
+    await signIn();
+    const paragraphs = Array.from({ length: 400 }, (_, i) => `<p>Paragraph ${i} describes the role in some detail for you.</p>`);
+    h.fetchPage.mockResolvedValue({
+      html: `<html><body><main><h2>Platform Engineer at Globex</h2>${paragraphs.join("")}</main></body></html>`,
+      finalUrl: "https://careers.test/long",
+    });
+    const body = await (await post({ url: "https://careers.test/long" })).json();
+    const d: string = body.fields.jobDescription;
+    expect(d.length).toBeLessThanOrEqual(12_000);
+    expect(d.length).toBeGreaterThan(11_000);
+    expect(d.endsWith("in some detail for you.")).toBe(true);
+  });
+});
+
 describe("a page without structured data", () => {
   it("fills the description and says what's missing when AI is off", async () => {
     await signIn();

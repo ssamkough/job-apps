@@ -1,4 +1,5 @@
 import { WORK_TYPES } from "@/lib/constants";
+import { truncateAtBoundary } from "./text";
 
 /** What an import can fill in on the Add application form. */
 export const IMPORT_FIELD_KEYS = [
@@ -26,6 +27,9 @@ const MAX_LENGTH: Record<ImportFieldKey, number> = {
   source: 80,
   jobDescription: 20_000,
 };
+
+/** The most a saved job description holds (same as `applicationSchema`). */
+export const MAX_DESCRIPTION_CHARS = MAX_LENGTH.jobDescription;
 
 function clip(value: string, max: number) {
   if (value.length <= max) return value;
@@ -74,7 +78,8 @@ export function sanitizeFields(raw: unknown): ImportFields {
       if (isHttpUrl(text) && text.length <= MAX_LENGTH.jobUrl) out.jobUrl = text;
       continue;
     }
-    out[key] = clip(text, MAX_LENGTH[key]);
+    // A long description is cut at a paragraph or sentence, not mid-word.
+    out[key] = key === "jobDescription" ? truncateAtBoundary(text, MAX_LENGTH[key]) : clip(text, MAX_LENGTH[key]);
   }
   return out;
 }

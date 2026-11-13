@@ -175,7 +175,7 @@ flowchart TD
     SF --> Q["findQuestions (questions.ts)<br/>Lever /apply · form labels"]
     BA -->|its questions win| Q
     M -->|company + title| COMPLETE["complete"]
-    M -->|otherwise| TXT["page text, 12k cap"]
+    M -->|otherwise| TXT["page text (html.ts, chrome.ts): main or article,<br/>banners and Apply lines dropped,<br/>cut at a paragraph, 12k cap"]
     PP --> TXT
     PT --> TXT
     TXT --> PARTIAL["partial: text as description,<br/>no company/title"]
@@ -201,12 +201,13 @@ Dotted edges are designed but not built.
 | Board API (`boards.ts`): Greenhouse, SmartRecruiters | company, title, location, work type, clean description, Greenhouse questions | the link is a Greenhouse or SmartRecruiters posting and the API answers; any failure is ignored |
 | schema.org `JobPosting` JSON-LD | company, title, location, salary, description | the page has one; fills what the board API left empty |
 | Page metadata (`meta.ts`): `og:title`, `<title>`, `<h1>`, `og:site_name`, the board link | company, title | last resort, for whatever the sources above left empty |
-| Page text | description only | everything else |
+| Page text (`html.ts`, `chrome.ts`) | description only | no description from the sources above. Takes `<main>`, `[role=main]` or `<article>`, else the body, without the head. Drops cookie banners, lone Apply, Share and Back lines, copyright lines and footer link lists |
 
 ### Limits and guards
 
 - Fetching: public addresses only (checked at connect time, redirects included), ports 80/443, 3 redirects, 8 s, 2 MB after decompression.
 - Board APIs: only the known hosts (`boards-api.greenhouse.io` and its EU twin, `api.smartrecruiters.com`), same fetch guards, 5 s, failures swallowed so the page path still runs.
+- Descriptions: page text is capped at 12,000 characters (20,000 when it is the description of an otherwise complete posting) and cut at a paragraph, else a sentence, else a word, never mid-word. Board and JSON-LD descriptions are cut the same way at 20,000.
 - Questions: best effort, never fail an import, at most 30 offered.
 - Jobs: queued jobs expire after 15 minutes, finished jobs are deleted after 7 days, at most 3 pending per person.
 
@@ -218,7 +219,7 @@ Dotted edges are designed but not built.
 ## Planned, not built
 
 - Importer: see "Not built" above (AI worker, JavaScript-rendered boards).
-- Importer accuracy fixes still to land, in order: tidier descriptions, small cleanups (tracking params, best `JobPosting`). Lever, Ashby and Workable APIs are possible later.
+- Importer accuracy fixes still to land: small cleanups (tracking params, best `JobPosting`, partial result when the text is short). Lever, Ashby and Workable APIs are possible later.
 - Drafting answers to saved questions with the local model (`Answer.source = "AI"` is the seam).
 - Scheduled database backup (Neon Free has one manual snapshot only).
 - `SUPPORT_EMAIL` is unset, so the privacy and terms pages show a placeholder address.
@@ -229,3 +230,4 @@ Dotted edges are designed but not built.
 - Widened from the importer to the whole system: system, access, data, flags and limits sections.
 - Importer fix 1: Greenhouse and SmartRecruiters read from their public APIs (`boards.ts`) before JSON-LD; Greenhouse questions moved there from `questions.ts`.
 - Importer fix 2: company and title fall back to page metadata (`meta.ts`): `og:title`, `<title>` with the site name stripped, `<h1>`, `og:site_name`, and the employer named in a job board link.
+- Importer fix 3: page-text descriptions drop cookie banners, Apply and Share lines and footer link lists, ignore the doctype and `<title>`, and are cut at a paragraph, sentence or word instead of mid-word (`chrome.ts`, `text.ts`).

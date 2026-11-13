@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  MAX_DESCRIPTION_CHARS,
   hasRequiredFields,
   mergeFields,
   sanitizeFields,
@@ -87,7 +88,7 @@ export async function prepareFromUrl(url: string, options: PrepareOptions = {}):
   if (hasRequiredFields(known)) {
     // Descriptions can be thin; fall back to the page text.
     if (!known.jobDescription) {
-      const text = pageText(page.html, 20_000);
+      const text = pageText(page.html, MAX_DESCRIPTION_CHARS);
       if (text.length >= MIN_TEXT_CHARS) known.jobDescription = text;
     }
     return {

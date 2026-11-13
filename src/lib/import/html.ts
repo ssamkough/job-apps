@@ -1,5 +1,7 @@
 import { parse, type HTMLElement } from "node-html-parser";
+import { dropChromeLines, removeConsentBanners } from "./chrome";
 import { sanitizeFields, type ImportFields } from "./fields";
+import { truncateAtBoundary } from "./text";
 
 /** Keeps what a model would be handed within its context window. */
 export const MAX_TEXT_CHARS = 12_000;
@@ -26,16 +28,29 @@ export function htmlToText(html: string): string {
   return collapse(root.structuredText);
 }
 
+const DOCTYPE = /^\s*<!doctype[^>]*>/i;
+
 /**
- * Text of the page's main content. Prefers <main>/<article> when present,
- * which drops most site chrome; otherwise the whole body.
+ * Text of the page's main content, for pages with no better description.
+ * Prefers <main>, [role=main] or <article>, which drops most site chrome;
+ * otherwise the whole body. Cookie banners, "Apply" and "Share" buttons and
+ * footer link lists are dropped, and text over `limit` is cut at a paragraph,
+ * sentence or word boundary, never mid-word.
  */
 export function pageText(html: string, limit = MAX_TEXT_CHARS): string {
-  const root = parse(html);
+  const root = parse(html.replace(DOCTYPE, ""));
   root.querySelectorAll(NOISE).forEach((n) => n.remove());
-  const main = root.querySelector("main") ?? root.querySelector("article") ?? root;
-  const text = collapse(main.structuredText);
-  return text.length > limit ? text.slice(0, limit) : text;
+  // The document <head> (its <title> repeats the heading) is not page text.
+  root.querySelectorAll("head").forEach((n) => {
+    if (!n.querySelector("body, main, article")) n.remove();
+  });
+  removeConsentBanners(root);
+  const main =
+    root.querySelector("main") ??
+    root.querySelector("[role=main]") ??
+    root.querySelector("article") ??
+    root;
+  return truncateAtBoundary(dropChromeLines(collapse(main.structuredText)), limit);
 }
 
 // ---- JSON-LD ---------------------------------------------------------------

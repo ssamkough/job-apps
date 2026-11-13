@@ -66,6 +66,18 @@ describe("sanitizeFields", () => {
   });
 });
 
+describe("long descriptions", () => {
+  it("are cut at a paragraph, not mid-sentence", () => {
+    const paragraph = `${"Build reliable systems with a friendly team. ".repeat(10).trim()}`;
+    const description = Array(60).fill(paragraph).join("\n");
+    const out = sanitizeFields({ jobDescription: description }).jobDescription!;
+    expect(out.length).toBeLessThanOrEqual(20_000);
+    expect(out.length).toBeGreaterThan(19_000);
+    expect(description.startsWith(out)).toBe(true);
+    expect(description[out.length]).toBe("\n");
+  });
+});
+
 describe("hasRequiredFields / mergeFields", () => {
   it("needs company and title", () => {
     expect(hasRequiredFields({ company: "A", jobTitle: "B" })).toBe(true);

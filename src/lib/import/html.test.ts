@@ -123,6 +123,112 @@ describe("pageText", () => {
   it("caps length", () => {
     expect(pageText(`<body><p>${"a".repeat(30_000)}</p></body>`, 1000)).toHaveLength(1000);
   });
+
+  it("leaves out the doctype and the <title> in the head", () => {
+    const html = `<!DOCTYPE html><html><head><title>Engineer - Careers at Acme</title></head>
+      <body><h1>Engineer</h1><p>Build things.</p></body></html>`;
+    expect(pageText(html)).toBe("Engineer\nBuild things.");
+  });
+
+  it("uses [role=main] and, failing that, <article>", () => {
+    expect(
+      pageText(`<body><div>Chrome</div><div role="main"><p>The posting</p></div><article>Other</article></body>`),
+    ).toBe("The posting");
+    expect(pageText(`<body><div>Chrome</div><article><p>The article</p></article></body>`)).toBe("The article");
+  });
+
+  it("cuts at a paragraph boundary, never mid-word, and never over the cap", () => {
+    const para = (n: number) => `Paragraph ${n} says that we build reliable software together.`;
+    const html = `<body>${[1, 2, 3, 4, 5].map((n) => `<p>${para(n)}</p>`).join("")}</body>`;
+    const limit = para(1).length * 3 + 10; // room for 3 paragraphs and a bit of the 4th
+    const text = pageText(html, limit);
+    expect(text).toBe([1, 2, 3].map(para).join("\n"));
+    expect(text.length).toBeLessThanOrEqual(limit);
+  });
+
+  it("falls back to a sentence, then a word, when a paragraph is too long to cut at", () => {
+    const sentence = "We build reliable software for people who care about it.";
+    const html = `<body><p>${Array(10).fill(sentence).join(" ")}</p></body>`;
+    const bySentence = pageText(html, sentence.length * 5 + 20);
+    expect(bySentence.endsWith("about it.")).toBe(true);
+    expect(bySentence.length).toBeLessThanOrEqual(sentence.length * 5 + 20);
+
+    const words = `<body><p>${"alpha beta gamma delta ".repeat(100)}</p></body>`;
+    const byWord = pageText(words, 101);
+    expect(byWord).toMatch(/(alpha|beta|gamma|delta)$/);
+    expect(byWord.split(" ").every((w) => ["alpha", "beta", "gamma", "delta"].includes(w))).toBe(true);
+    expect(byWord.length).toBeLessThanOrEqual(101);
+  });
+
+  describe("site chrome", () => {
+    const POSTING = `<h1>Platform Engineer</h1><p>Remote, US</p><h2>About the role</h2>
+      <p>You will build and run the services that power our product, with a team that cares.</p>
+      <h2>Requirements</h2><ul><li>Go</li><li>SQL</li><li>Kubernetes</li><li>AWS</li><li>Postgres</li></ul>`;
+
+    it("drops cookie banners, but keeps the posting", () => {
+      const html = `<body>
+        <div id="cookie-banner"><p>We use cookies to improve your experience.</p><button>Accept all</button></div>
+        <div class="onetrust-consent-sdk">Manage preferences</div>
+        ${POSTING}</body>`;
+      const text = pageText(html);
+      expect(text).not.toMatch(/cookies|Accept all|Manage preferences/);
+      expect(text).toContain("Platform Engineer");
+      expect(text).toContain("Kubernetes");
+    });
+
+    it("never removes a wrapper that only has 'consent' or 'cookie' in a class", () => {
+      const html = `<body class="cookie-consent-open"><div class="page cookie-wrapper">${POSTING}</div></body>`;
+      expect(pageText(html)).toContain("build and run the services");
+    });
+
+    it("keeps a posting that mentions privacy inside a wrapper with 'cookie' in its class", () => {
+      const html = `<body><div class="cookie-wrapper"><p>Respect user privacy in everything you build here, every single day.</p></div></body>`;
+      expect(pageText(html)).toContain("Respect user privacy");
+    });
+
+    it("drops cookie notice lines even without a recognisable container", () => {
+      const html = `<body><p>This website uses cookies to ensure you get the best experience.</p>
+        <p>Cookie Preferences Your Privacy Choices</p>${POSTING}</body>`;
+      expect(pageText(html)).not.toMatch(/uses cookies|Cookie Preferences/i);
+    });
+
+    it("keeps job text that merely mentions cookies", () => {
+      const html = `<body><p>Experience with cookies, sessions and tokens in web apps is a plus.</p></body>`;
+      expect(pageText(html)).toContain("Experience with cookies");
+    });
+
+    it("drops Apply buttons, share lines and back links, but not sentences that start with those words", () => {
+      const html = `<body>
+        <p>Back to jobs</p>${POSTING}
+        <a>Apply</a><p>Share this job</p><p>Share on LinkedIn</p><button>Apply now</button>
+        <p>Apply for this job</p>
+        <p>Apply your skills to problems that matter to millions of people.</p>
+        <p>Share ownership of the roadmap with product and design.</p></body>`;
+      const text = pageText(html);
+      expect(text.split("\n")).not.toContain("Apply");
+      expect(text).not.toMatch(/Back to jobs|Share this job|Share on LinkedIn|Apply now|Apply for this job/);
+      expect(text).toContain("Apply your skills to problems");
+      expect(text).toContain("Share ownership of the roadmap");
+    });
+
+    it("drops a footer link list and copyright line made of well-known menu words", () => {
+      const html = `<body>${POSTING}
+        <div>Life at Acme</div><div>FAQ</div><div>Candidate Privacy</div><div>Careers</div>
+        <div>Terms</div><div>Sitemap</div><div>© Acme, Inc</div></body>`;
+      const text = pageText(html);
+      expect(text).not.toMatch(/Life at Acme|FAQ|Sitemap|©/);
+      expect(text).toContain("Postgres");
+    });
+
+    it("keeps short lists of real content, such as skills and benefits", () => {
+      const html = `<body><h2>Skills</h2><ul><li>Python</li><li>Go</li><li>Rust</li><li>SQL</li><li>Privacy</li></ul>
+        <h2>About us</h2><p>We make things.</p><h2>Careers</h2><p>Grow here.</p></body>`;
+      const text = pageText(html);
+      expect(text).toContain("Python\nGo\nRust\nSQL\nPrivacy");
+      expect(text).toContain("About us\nWe make things.");
+      expect(text).toContain("Careers\nGrow here.");
+    });
+  });
 });
 
 describe("htmlToText", () => {
