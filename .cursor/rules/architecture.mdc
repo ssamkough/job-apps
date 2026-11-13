@@ -1,0 +1,38 @@
+---
+description: Keep docs/import-architecture.md (the system architecture diagrams) in step with every architecture change
+alwaysApply: true
+---
+
+# Architecture diagrams
+
+`docs/import-architecture.md` is the single picture of how the whole system
+works (despite the name: system, access, data, flags and limits, and the job
+posting importer). It must never drift from the code.
+
+## When this applies
+
+Any change to how the system is built or wired, not just the importer:
+
+- A service, integration, queue, worker or external call added or removed
+- A route, page area, proxy matcher or access check (`requireUser`, `requireAdmin`)
+- A Prisma model, relation or migration, or how migrations are applied
+- A feature flag, rate limit, environment, domain, region or deploy step
+- Anything under `src/lib/import/`, `src/app/api/import/`, `src/components/import-box.tsx`
+
+## What to do, in the same commit as the change
+
+1. **Diagrams**: add, remove or re-wire nodes so the arrows match the code's
+   real order. Solid edges are built; dotted edges and "OFF" / "NOT BUILT"
+   boxes are planned only.
+2. **Tables**: routes, flags, rate limits, environments, importer sources,
+   limits and guards, "Not built", "Planned, not built".
+3. **Changelog**: one line per change, newest last.
+4. **Render check**: keep node labels in quotes, no stray `(` or `;` outside
+   quotes. Every `mermaid` block must parse.
+
+## Before finishing a task
+
+Re-read the diagrams against the code you touched. If a box, arrow or number no
+longer matches, fix the doc, not just the code. Remove an item from the "not
+built" lists the moment it ships. If a change has no architectural effect (copy,
+styling, a bug fix inside one box), the doc needs no edit.
