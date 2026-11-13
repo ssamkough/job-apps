@@ -15,7 +15,6 @@ import {
   leverApplyUrl,
   leverQuestions,
 } from "./questions";
-import { FetchError } from "./safe-fetch";
 
 beforeEach(() => {
   h.fetchJson.mockReset();
@@ -151,16 +150,6 @@ describe("formQuestions", () => {
 describe("findQuestions", () => {
   const gh = { html: "<html></html>", finalUrl: "https://boards.greenhouse.io/acme/jobs/55" };
 
-  it("asks Greenhouse's public API for a Greenhouse posting", async () => {
-    h.fetchJson.mockResolvedValue({ questions: [{ label: "Why Acme?", fields: [{ type: "textarea" }] }] });
-    expect(await findQuestions(gh)).toEqual(["Why Acme?"]);
-    expect(h.fetchJson).toHaveBeenCalledWith(
-      "https://boards-api.greenhouse.io/v1/boards/acme/jobs/55?questions=true",
-      expect.objectContaining({ timeoutMs: expect.any(Number) }),
-    );
-    expect(h.fetchPage).not.toHaveBeenCalled();
-  });
-
   it("fetches Lever's apply page, with room for its size", async () => {
     h.fetchPage.mockResolvedValue({
       html: `<li class="application-question custom-question"><div class="application-label">Why Lever?</div></li>`,
@@ -174,12 +163,10 @@ describe("findQuestions", () => {
     );
   });
 
-  it("falls back to the page's own form when the API fails or is empty", async () => {
+  it("leaves Greenhouse's API to boards.ts and reads the page's own form", async () => {
     const html = `<form><textarea aria-label="Tell us about yourself"></textarea></form>`;
-    h.fetchJson.mockRejectedValue(new FetchError("http_error", 404));
     expect(await findQuestions({ ...gh, html })).toEqual(["Tell us about yourself"]);
-    h.fetchJson.mockResolvedValue({ questions: [] });
-    expect(await findQuestions({ ...gh, html })).toEqual(["Tell us about yourself"]);
+    expect(h.fetchJson).not.toHaveBeenCalled();
   });
 
   it("reads forms on any other page, and never throws", async () => {

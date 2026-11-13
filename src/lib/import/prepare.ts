@@ -1,9 +1,11 @@
 import "server-only";
 import {
   hasRequiredFields,
+  mergeFields,
   sanitizeFields,
   type ImportFields,
 } from "./fields";
+import { readBoard } from "./boards";
 import { MAX_TEXT_CHARS, MIN_TEXT_CHARS, pageText, readJobPosting } from "./html";
 import { fetchPage, FetchError, type FetchFailure } from "./safe-fetch";
 import { readPostingPdf } from "./pdf";
@@ -70,20 +72,25 @@ export async function prepareFromUrl(url: string, options: PrepareOptions = {}):
     return { status: "error", code: e instanceof FetchError ? e.code : "unreachable" };
   }
 
-  // Best effort: never fails the import, and bounded by its own timeouts.
-  const questions = await findQuestions(page);
+  // A board's own API is the most exact source (and is also where Greenhouse
+  // lists its questions). Best effort: every step below falls back to the page.
+  const board = await readBoard(page);
+  const questions = board?.questions.length ? board.questions : await findQuestions(page);
 
+  // Board API first, then the page's JSON-LD fills what is still missing.
   const structured = readJobPosting(page.html, page.finalUrl);
-  if (structured && hasRequiredFields(structured)) {
-    // JSON-LD descriptions can be thin; fall back to the page text.
-    if (!structured.jobDescription) {
+  const known = mergeFields(board?.fields ?? {}, structured ?? {});
+
+  if (hasRequiredFields(known)) {
+    // Descriptions can be thin; fall back to the page text.
+    if (!known.jobDescription) {
       const text = pageText(page.html, 20_000);
-      if (text.length >= MIN_TEXT_CHARS) structured.jobDescription = text;
+      if (text.length >= MIN_TEXT_CHARS) known.jobDescription = text;
     }
     return {
       status: "complete",
       kind: "URL",
-      fields: sanitizeFields(structured),
+      fields: sanitizeFields(known),
       questions,
       sourceUrl: page.finalUrl,
     };
@@ -91,7 +98,7 @@ export async function prepareFromUrl(url: string, options: PrepareOptions = {}):
 
   const text = pageText(page.html);
   if (text.length < MIN_TEXT_CHARS) return { status: "error", code: "no_content" };
-  return partial("URL", text, { ...structured, jobUrl: page.finalUrl }, page.finalUrl, questions);
+  return partial("URL", text, { ...known, jobUrl: page.finalUrl }, page.finalUrl, questions);
 }
 
 export async function prepareFromPdf(file: File): Promise<Prepared> {

@@ -1,7 +1,7 @@
 import "server-only";
 import { parse, type HTMLElement } from "node-html-parser";
 import { sanitizeQuestionList } from "@/lib/questions";
-import { fetchJson, fetchPage, type FetchedPage } from "./safe-fetch";
+import { fetchPage, type FetchedPage } from "./safe-fetch";
 
 /**
  * Finds the questions a job application asks (beyond the usual name, email and
@@ -10,6 +10,8 @@ import { fetchJson, fetchPage, type FetchedPage } from "./safe-fetch";
  *
  * Order of preference:
  *  1. Greenhouse's public board API (exact, includes optional questions).
+ *     That call lives in `boards.ts`, which reads the whole posting at once;
+ *     this file keeps the Greenhouse parsing helpers it uses.
  *  2. Lever's apply page, whose custom questions are marked up as such.
  *  3. Labelled fields of any application form on the page itself.
  */
@@ -77,15 +79,6 @@ export function greenhouseQuestions(data: unknown): string[] {
     .filter((q) => !(q.fields ?? []).every((f) => f?.type === "input_file"))
     .map((q) => q.label);
   return sanitizeQuestionList(labels);
-}
-
-async function fromGreenhouse(page: FetchedPage): Promise<string[] | null> {
-  const ref = greenhouseRef(page);
-  if (!ref) return null;
-  const data = await fetchJson(`${ref.api}/v1/boards/${ref.token}/jobs/${ref.jobId}?questions=true`, {
-    timeoutMs: STEP_TIMEOUT_MS,
-  });
-  return greenhouseQuestions(data);
 }
 
 // ---- Lever ------------------------------------------------------------------
@@ -193,7 +186,7 @@ export function formQuestions(html: string): string[] {
 
 /** Application questions for a fetched posting. Never throws. */
 export async function findQuestions(page: FetchedPage): Promise<string[]> {
-  for (const source of [fromGreenhouse, fromLever]) {
+  for (const source of [fromLever]) {
     try {
       const found = await source(page);
       if (found && found.length > 0) return found;

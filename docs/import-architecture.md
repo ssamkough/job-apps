@@ -18,7 +18,7 @@ Contents: [System](#system) · [Requests and access](#requests-and-access) ·
 flowchart LR
     user(["Browser"])
     inbox(["Your inbox"])
-    boards(["Public job sites<br/>Greenhouse · Lever · any page"])
+    boards(["Public job sites<br/>Greenhouse · SmartRecruiters APIs<br/>Lever · any page"])
 
     subgraph dns["jobapphelp.net"]
         direction TB
@@ -166,10 +166,14 @@ flowchart TD
     end
 
     PU --> SF["safe-fetch: public hosts only, ports 80/443,<br/>3 redirects, 8 s, 2 MB, HTML only"]
+    SF --> BA["readBoard (boards.ts)<br/>Greenhouse · SmartRecruiters public API<br/>(fetchJson, 5 s)"]
     SF --> LD["JSON-LD JobPosting<br/>(html.ts)"]
-    SF --> Q["findQuestions (questions.ts)<br/>Greenhouse API · Lever /apply · form labels"]
-    LD -->|company + title| COMPLETE["complete"]
-    LD -->|otherwise| TXT["page text, 12k cap"]
+    BA --> M["mergeFields: board first,<br/>JSON-LD fills gaps"]
+    LD --> M
+    SF --> Q["findQuestions (questions.ts)<br/>Lever /apply · form labels"]
+    BA -->|its questions win| Q
+    M -->|company + title| COMPLETE["complete"]
+    M -->|otherwise| TXT["page text, 12k cap"]
     PP --> TXT
     PT --> TXT
     TXT --> PARTIAL["partial: text as description,<br/>no company/title"]
@@ -192,12 +196,14 @@ Dotted edges are designed but not built.
 
 | Source | Gives | Used when |
 | --- | --- | --- |
-| schema.org `JobPosting` JSON-LD | company, title, location, salary, description | the page has one with company and title |
+| Board API (`boards.ts`): Greenhouse, SmartRecruiters | company, title, location, work type, clean description, Greenhouse questions | the link is a Greenhouse or SmartRecruiters posting and the API answers; any failure is ignored |
+| schema.org `JobPosting` JSON-LD | company, title, location, salary, description | the page has one; fills what the board API left empty |
 | Page text | description only | everything else |
 
 ### Limits and guards
 
 - Fetching: public addresses only (checked at connect time, redirects included), ports 80/443, 3 redirects, 8 s, 2 MB after decompression.
+- Board APIs: only the known hosts (`boards-api.greenhouse.io` and its EU twin, `api.smartrecruiters.com`), same fetch guards, 5 s, failures swallowed so the page path still runs.
 - Questions: best effort, never fail an import, at most 30 offered.
 - Jobs: queued jobs expire after 15 minutes, finished jobs are deleted after 7 days, at most 3 pending per person.
 
@@ -209,6 +215,7 @@ Dotted edges are designed but not built.
 ## Planned, not built
 
 - Importer: see "Not built" above (AI worker, JavaScript-rendered boards).
+- Importer accuracy fixes still to land, in order: metadata fallback chain (`og:title`, `<title>`, `<h1>`, company from URL), tidier descriptions, small cleanups (tracking params, best `JobPosting`). Lever, Ashby and Workable APIs are possible later.
 - Drafting answers to saved questions with the local model (`Answer.source = "AI"` is the seam).
 - Scheduled database backup (Neon Free has one manual snapshot only).
 - `SUPPORT_EMAIL` is unset, so the privacy and terms pages show a placeholder address.
@@ -217,3 +224,4 @@ Dotted edges are designed but not built.
 
 - Initial version: JSON-LD, page text, questions.
 - Widened from the importer to the whole system: system, access, data, flags and limits sections.
+- Importer fix 1: Greenhouse and SmartRecruiters read from their public APIs (`boards.ts`) before JSON-LD; Greenhouse questions moved there from `questions.ts`.
