@@ -217,6 +217,8 @@ variant keeps the question; deleting a question removes it from every
 application; deleting an account removes all of it. `Answer.source` is the seam
 for drafting answers with the local model later (not built yet).
 
+**How the importer works** is drawn in [`docs/import-architecture.md`](docs/import-architecture.md) (kept current by a Cursor rule).
+
 **Finding questions when importing a posting.** The importer looks for the
 questions a posting's application asks and offers them to add (never adds them
 on its own): Greenhouse boards through Greenhouse's public board API, Lever

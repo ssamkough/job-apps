@@ -1,0 +1,26 @@
+---
+description: Keep docs/import-architecture.md in step with the job posting importer
+globs: src/lib/import/**/*,src/app/api/import/**/*,src/components/import-box.tsx,src/lib/questions.ts,src/lib/question-store.ts,docs/import-architecture.md
+alwaysApply: false
+---
+
+# Importer architecture diagram
+
+`docs/import-architecture.md` is the single picture of how the job URL importer
+works. It must never drift from the code.
+
+When you change the importer (new source, adapter, fallback step, guard, limit,
+queue, route or UI hand-off), update the doc **in the same commit**:
+
+1. **Diagram**: add, remove or re-wire nodes in the mermaid flowchart so the
+   arrows match the code's real order. Solid edges are built; dotted edges are
+   planned only.
+2. **Tables**: "Sources of company and title", "Limits and guards", "Not built".
+3. **Changelog**: one line per change, newest last.
+4. Check the diagram renders: keep node labels in quotes, no stray `(` or `;`
+   outside quotes.
+
+Before finishing a task that touched these files, re-read the diagram against
+the code. If a box or arrow no longer matches, fix the doc, not just the code.
+
+Also keep the "Not built" list honest: remove an item when it ships.
