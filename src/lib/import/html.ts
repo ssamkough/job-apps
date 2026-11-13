@@ -38,13 +38,6 @@ export function pageText(html: string, limit = MAX_TEXT_CHARS): string {
   return text.length > limit ? text.slice(0, limit) : text;
 }
 
-/** Title the site gave the page, as a last-resort hint. */
-export function pageTitle(html: string): string | undefined {
-  const root = parse(html);
-  const t = root.querySelector("title")?.text.trim();
-  return t || undefined;
-}
-
 // ---- JSON-LD ---------------------------------------------------------------
 
 type Json = Record<string, unknown>;

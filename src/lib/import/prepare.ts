@@ -6,6 +6,7 @@ import {
   type ImportFields,
 } from "./fields";
 import { readBoard } from "./boards";
+import { readPageMeta } from "./meta";
 import { MAX_TEXT_CHARS, MIN_TEXT_CHARS, pageText, readJobPosting } from "./html";
 import { fetchPage, FetchError, type FetchFailure } from "./safe-fetch";
 import { readPostingPdf } from "./pdf";
@@ -77,9 +78,11 @@ export async function prepareFromUrl(url: string, options: PrepareOptions = {}):
   const board = await readBoard(page);
   const questions = board?.questions.length ? board.questions : await findQuestions(page);
 
-  // Board API first, then the page's JSON-LD fills what is still missing.
+  // Board API first, then the page's JSON-LD, then its title and site name for
+  // whatever is still missing.
   const structured = readJobPosting(page.html, page.finalUrl);
-  const known = mergeFields(board?.fields ?? {}, structured ?? {});
+  const meta = readPageMeta(page.html, page.finalUrl);
+  const known = mergeFields(board?.fields ?? {}, mergeFields(structured ?? {}, meta));
 
   if (hasRequiredFields(known)) {
     // Descriptions can be thin; fall back to the page text.

@@ -168,8 +168,10 @@ flowchart TD
     PU --> SF["safe-fetch: public hosts only, ports 80/443,<br/>3 redirects, 8 s, 2 MB, HTML only"]
     SF --> BA["readBoard (boards.ts)<br/>Greenhouse · SmartRecruiters public API<br/>(fetchJson, 5 s)"]
     SF --> LD["JSON-LD JobPosting<br/>(html.ts)"]
-    BA --> M["mergeFields: board first,<br/>JSON-LD fills gaps"]
+    SF --> MD["readPageMeta (meta.ts)<br/>og:title · title · h1 · site name · board link"]
+    BA --> M["mergeFields: board, then JSON-LD,<br/>then page metadata fills gaps"]
     LD --> M
+    MD --> M
     SF --> Q["findQuestions (questions.ts)<br/>Lever /apply · form labels"]
     BA -->|its questions win| Q
     M -->|company + title| COMPLETE["complete"]
@@ -198,6 +200,7 @@ Dotted edges are designed but not built.
 | --- | --- | --- |
 | Board API (`boards.ts`): Greenhouse, SmartRecruiters | company, title, location, work type, clean description, Greenhouse questions | the link is a Greenhouse or SmartRecruiters posting and the API answers; any failure is ignored |
 | schema.org `JobPosting` JSON-LD | company, title, location, salary, description | the page has one; fills what the board API left empty |
+| Page metadata (`meta.ts`): `og:title`, `<title>`, `<h1>`, `og:site_name`, the board link | company, title | last resort, for whatever the sources above left empty |
 | Page text | description only | everything else |
 
 ### Limits and guards
@@ -215,7 +218,7 @@ Dotted edges are designed but not built.
 ## Planned, not built
 
 - Importer: see "Not built" above (AI worker, JavaScript-rendered boards).
-- Importer accuracy fixes still to land, in order: metadata fallback chain (`og:title`, `<title>`, `<h1>`, company from URL), tidier descriptions, small cleanups (tracking params, best `JobPosting`). Lever, Ashby and Workable APIs are possible later.
+- Importer accuracy fixes still to land, in order: tidier descriptions, small cleanups (tracking params, best `JobPosting`). Lever, Ashby and Workable APIs are possible later.
 - Drafting answers to saved questions with the local model (`Answer.source = "AI"` is the seam).
 - Scheduled database backup (Neon Free has one manual snapshot only).
 - `SUPPORT_EMAIL` is unset, so the privacy and terms pages show a placeholder address.
@@ -225,3 +228,4 @@ Dotted edges are designed but not built.
 - Initial version: JSON-LD, page text, questions.
 - Widened from the importer to the whole system: system, access, data, flags and limits sections.
 - Importer fix 1: Greenhouse and SmartRecruiters read from their public APIs (`boards.ts`) before JSON-LD; Greenhouse questions moved there from `questions.ts`.
+- Importer fix 2: company and title fall back to page metadata (`meta.ts`): `og:title`, `<title>` with the site name stripped, `<h1>`, `og:site_name`, and the employer named in a job board link.

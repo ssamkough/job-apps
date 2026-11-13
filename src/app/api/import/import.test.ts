@@ -67,7 +67,7 @@ const withLd = (posting: object) =>
     "@type": "JobPosting",
     ...posting,
   })}</script></head><body><main><p>${LONG}</p></main></body></html>`;
-const PLAIN = `<html><body><main><h1>Platform Engineer at Globex</h1><p>${LONG}</p></main></body></html>`;
+const PLAIN = `<html><body><main><h2>Platform Engineer at Globex</h2><p>${LONG}</p></main></body></html>`;
 
 let queued: ExtractionRequest[];
 const fakeQueue = { enqueue: async (r: ExtractionRequest) => void queued.push(r) };
@@ -169,6 +169,19 @@ describe("a page without structured data", () => {
     expect(body.fields.company).toBeUndefined();
     expect(body.fields.jobUrl).toBe("https://careers.test/p");
     expect(body.fields.jobDescription).toContain("platform engineer");
+  });
+
+  it("fills company and title from the page's own metadata when there is no JSON-LD", async () => {
+    await signIn();
+    h.fetchPage.mockResolvedValue({
+      html: `<html><head><title>Platform Engineer | Globex</title><meta property="og:site_name" content="Globex"></head><body><main><p>${LONG}</p></main></body></html>`,
+      finalUrl: "https://careers.test/p",
+    });
+    const body = await (await post({ url: "https://careers.test/p" })).json();
+    expect(body).toMatchObject({
+      status: "done",
+      fields: { company: "Globex", jobTitle: "Platform Engineer" },
+    });
   });
 
   it("queues it for the worker when AI import is on, sending the text along", async () => {
