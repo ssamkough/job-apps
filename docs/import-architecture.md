@@ -167,21 +167,23 @@ flowchart TD
 
     PU --> SF["safe-fetch: public hosts only, ports 80/443,<br/>3 redirects, 8 s, 2 MB, HTML only"]
     SF --> BA["readBoard (boards.ts)<br/>Greenhouse · SmartRecruiters public API<br/>(fetchJson, 5 s)"]
-    SF --> LD["JSON-LD JobPosting<br/>(html.ts)"]
+    SF --> LD["JSON-LD JobPosting (html.ts)<br/>the one matching the page url or id,<br/>else one with title and employer"]
     SF --> MD["readPageMeta (meta.ts)<br/>og:title · title · h1 · site name · board link"]
     BA --> M["mergeFields: board, then JSON-LD,<br/>then page metadata fills gaps"]
     LD --> M
     MD --> M
     SF --> Q["findQuestions (questions.ts)<br/>Lever /apply · form labels"]
     BA -->|its questions win| Q
-    M -->|company + title| COMPLETE["complete"]
-    M -->|otherwise| TXT["page text (html.ts, chrome.ts): main or article,<br/>banners and Apply lines dropped,<br/>cut at a paragraph, 12k cap"]
+    M --> UC["jobUrl: cleanJobUrl (url.ts)<br/>tracking parameters dropped"]
+    UC -->|company + title| COMPLETE["complete"]
+    UC -->|otherwise| TXT["page text (html.ts, chrome.ts): main or article,<br/>banners and Apply lines dropped,<br/>cut at a paragraph, 12k cap"]
     PP --> TXT
     PT --> TXT
-    TXT --> PARTIAL["partial: text as description,<br/>no company/title"]
+    TXT --> PARTIAL["partial: text as description,<br/>plus any company or title found"]
+    TXT -->|"link, under 200 characters,<br/>no company or title"| NOC["error: no_content"]
 
     COMPLETE --> JOB[("ImportJob row<br/>kept 7 days")]
-    PARTIAL -->|AI_IMPORT_ENABLED and a queue| QUEUE["ImportQueue (not wired yet)"]
+    PARTIAL -->|"AI_IMPORT_ENABLED, a queue<br/>and 200+ characters of text"| QUEUE["ImportQueue (not wired yet)"]
     PARTIAL -->|otherwise| JOB
     QUEUE -.->|"completeJob / failJob"| JOB
     Q --> JOB
@@ -199,7 +201,7 @@ Dotted edges are designed but not built.
 | Source | Gives | Used when |
 | --- | --- | --- |
 | Board API (`boards.ts`): Greenhouse, SmartRecruiters | company, title, location, work type, clean description, Greenhouse questions | the link is a Greenhouse or SmartRecruiters posting and the API answers; any failure is ignored |
-| schema.org `JobPosting` JSON-LD | company, title, location, salary, description | the page has one; fills what the board API left empty |
+| schema.org `JobPosting` JSON-LD | company, title, location, salary, description | the page has one; fills what the board API left empty. With several, the one whose `url` or `identifier` matches the page address, else the first with a title and employer, else the first |
 | Page metadata (`meta.ts`): `og:title`, `<title>`, `<h1>`, `og:site_name`, the board link | company, title | last resort, for whatever the sources above left empty |
 | Page text (`html.ts`, `chrome.ts`) | description only | no description from the sources above. Takes `<main>`, `[role=main]` or `<article>`, else the body, without the head. Drops cookie banners, lone Apply, Share and Back lines, copyright lines and footer link lists |
 
@@ -208,18 +210,20 @@ Dotted edges are designed but not built.
 - Fetching: public addresses only (checked at connect time, redirects included), ports 80/443, 3 redirects, 8 s, 2 MB after decompression.
 - Board APIs: only the known hosts (`boards-api.greenhouse.io` and its EU twin, `api.smartrecruiters.com`), same fetch guards, 5 s, failures swallowed so the page path still runs.
 - Descriptions: page text is capped at 12,000 characters (20,000 when it is the description of an otherwise complete posting) and cut at a paragraph, else a sentence, else a word, never mid-word. Board and JSON-LD descriptions are cut the same way at 20,000.
+- Stored link: the page that was read, minus `utm_*`, `gh_src`, `lever-source`, `lever-origin`, `fbclid`, `gclid` and similar, and `ref`, `src`, `source` unless numeric (`url.ts`). `gh_jid` stays unless the path already carries the same id (stripe.com/jobs/search needs it); the fragment stays.
+- Thin pages: a link whose text is under 200 characters (a JavaScript shell) still returns a company or title that was found, with no description and a notice, and is never queued for the AI worker. With nothing found it is `no_content`.
 - Questions: best effort, never fail an import, at most 30 offered.
 - Jobs: queued jobs expire after 15 minutes, finished jobs are deleted after 7 days, at most 3 pending per person.
 
 ### Not built
 
 - AI extraction (Phases 2 to 4): no queue or worker. Blocked on the Inngest install and a worker server.
-- JavaScript-rendered boards (Meta, Workable, Workday) return "no readable text".
+- JavaScript-rendered boards (Meta, Workable, Workday) return "no readable text" unless the page's metadata names a company or title.
 
 ## Planned, not built
 
 - Importer: see "Not built" above (AI worker, JavaScript-rendered boards).
-- Importer accuracy fixes still to land: small cleanups (tracking params, best `JobPosting`, partial result when the text is short). Lever, Ashby and Workable APIs are possible later.
+- Importer: Lever, Ashby and Workable APIs are possible later.
 - Drafting answers to saved questions with the local model (`Answer.source = "AI"` is the seam).
 - Scheduled database backup (Neon Free has one manual snapshot only).
 - `SUPPORT_EMAIL` is unset, so the privacy and terms pages show a placeholder address.
@@ -231,3 +235,4 @@ Dotted edges are designed but not built.
 - Importer fix 1: Greenhouse and SmartRecruiters read from their public APIs (`boards.ts`) before JSON-LD; Greenhouse questions moved there from `questions.ts`.
 - Importer fix 2: company and title fall back to page metadata (`meta.ts`): `og:title`, `<title>` with the site name stripped, `<h1>`, `og:site_name`, and the employer named in a job board link.
 - Importer fix 3: page-text descriptions drop cookie banners, Apply and Share lines and footer link lists, ignore the doctype and `<title>`, and are cut at a paragraph, sentence or word instead of mid-word (`chrome.ts`, `text.ts`).
+- Importer fix 4: tracking parameters are stripped from the stored link (`url.ts`), the best of several JSON-LD `JobPosting`s is used, and a page with too little text still returns the company or title it found instead of failing.

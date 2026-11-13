@@ -2,6 +2,7 @@ import { parse, type HTMLElement } from "node-html-parser";
 import { dropChromeLines, removeConsentBanners } from "./chrome";
 import { sanitizeFields, type ImportFields } from "./fields";
 import { truncateAtBoundary } from "./text";
+import { cleanJobUrl } from "./url";
 
 /** Keeps what a model would be handed within its context window. */
 export const MAX_TEXT_CHARS = 12_000;
@@ -138,20 +139,68 @@ function salaryOf(posting: Json): string {
   return `${currency ? `${currency} ` : ""}${amount}${unit ? ` / ${unit}` : ""}`;
 }
 
+/** Host, path and identifying parameters of a link, so two spellings of one posting compare equal. */
+function linkKey(raw: string): string | null {
+  try {
+    const url = new URL(cleanJobUrl(raw));
+    const query = [...url.searchParams].map(([k, v]) => `${k}=${v}`).sort().join("&");
+    return `${url.hostname.replace(/^www\./, "").toLowerCase()}${url.pathname.replace(/\/+$/, "")}?${query}`;
+  } catch {
+    return null;
+  }
+}
+
+/** The posting's own ids (`identifier` is a string, a number or a PropertyValue). */
+function identifiersOf(posting: Json): string[] {
+  return asArray(posting.identifier)
+    .map((id) => (isObject(id) ? str(id.value) || String(id.value ?? "") : String(id ?? "")).trim())
+    .filter((id) => id.length >= 4);
+}
+
+function urlHasToken(pageUrl: URL, token: string) {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Za-z0-9])${escaped}($|[^A-Za-z0-9])`).test(pageUrl.pathname + pageUrl.search);
+}
+
+/**
+ * The JobPosting that describes the page being read. A page can carry several
+ * (a listing, or a @graph of related jobs), so prefer the one whose url or
+ * identifier matches the page's address, then one that names a title and an
+ * employer, then simply the first.
+ */
+function pickPosting(postings: Json[], pageUrl?: string): Json | undefined {
+  if (postings.length <= 1) return postings[0];
+  if (pageUrl) {
+    const wanted = linkKey(pageUrl);
+    const byUrl = wanted && postings.find((p) => str(p.url) && linkKey(str(p.url)) === wanted);
+    if (byUrl) return byUrl;
+    try {
+      const page = new URL(pageUrl);
+      const byId = postings.find((p) => identifiersOf(p).some((id) => urlHasToken(page, id)));
+      if (byId) return byId;
+    } catch {
+      // Not a usable address; fall through.
+    }
+  }
+  return (
+    postings.find((p) => (str(p.title) || str(p.name)) && nameOf(p.hiringOrganization)) ?? postings[0]
+  );
+}
+
 /**
  * Reads a schema.org JobPosting from the page's JSON-LD, which most job
  * boards publish for Google Jobs. Returns null when there isn't one.
  */
 export function readJobPosting(html: string, pageUrl?: string): ImportFields | null {
   const root = parse(html);
-  const posting = jsonLdNodes(root).find(isJobPosting);
+  const posting = pickPosting(jsonLdNodes(root).filter(isJobPosting), pageUrl);
   if (!posting) return null;
 
   const remote = str(posting.jobLocationType).toUpperCase() === "TELECOMMUTE";
   const fields = sanitizeFields({
     company: nameOf(posting.hiringOrganization),
     jobTitle: htmlToText(str(posting.title) || str(posting.name)),
-    jobUrl: str(posting.url) || pageUrl,
+    jobUrl: cleanJobUrl(str(posting.url) || pageUrl || ""),
     location: locationOf(posting),
     workType: remote ? "REMOTE" : undefined,
     salary: salaryOf(posting),
@@ -159,6 +208,6 @@ export function readJobPosting(html: string, pageUrl?: string): ImportFields | n
   });
   // The posting's own URL can point somewhere unrelated; the page we read is
   // the better link to keep.
-  if (pageUrl) fields.jobUrl = sanitizeFields({ jobUrl: pageUrl }).jobUrl ?? fields.jobUrl;
+  if (pageUrl) fields.jobUrl = sanitizeFields({ jobUrl: cleanJobUrl(pageUrl) }).jobUrl ?? fields.jobUrl;
   return fields;
 }

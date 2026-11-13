@@ -31,6 +31,9 @@ type StoredResult = { fields: ImportFields; via: ImportVia; notice?: string };
 export const NOTICE_NO_AI =
   "Filled in the description and link. The company and job title couldn't be detected automatically, so add them yourself.";
 
+export const NOTICE_THIN_PAGE =
+  "Filled in what we could find, but this page has very little readable text (many job boards load it with JavaScript). Add the rest yourself, or paste the posting text instead.";
+
 export const NOTICE_NOT_FOUND =
   "Couldn't find the company and job title in this posting. The description is filled in; add the rest yourself.";
 

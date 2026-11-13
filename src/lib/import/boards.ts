@@ -4,6 +4,7 @@ import { sanitizeFields, type ImportFields } from "./fields";
 import { htmlToText } from "./html";
 import { greenhouseQuestions, greenhouseRef } from "./questions";
 import { fetchJson, type FetchedPage } from "./safe-fetch";
+import { cleanJobUrl } from "./url";
 
 /**
  * Job boards that publish a public posting API. Asking the API beats reading
@@ -58,7 +59,7 @@ export function greenhousePosting(data: unknown, pageUrl: string): BoardPosting 
     location: isObject(data.location) ? str(data.location.name) : "",
     workType: locationType ? workTypeFrom(str(locationType.value)) : undefined,
     jobDescription: typeof data.content === "string" ? escapedHtmlToText(data.content) : "",
-    jobUrl: pageUrl,
+    jobUrl: cleanJobUrl(pageUrl),
   });
   if (!fields.jobTitle && !fields.company) return null;
   return { board: "greenhouse", fields, questions: greenhouseQuestions(data) };
@@ -119,7 +120,7 @@ export function smartRecruitersPosting(data: unknown, pageUrl: string): BoardPos
     location: place,
     workType: remote ? "REMOTE" : hybrid ? "HYBRID" : undefined,
     jobDescription: description,
-    jobUrl: pageUrl,
+    jobUrl: cleanJobUrl(pageUrl),
   });
   if (!fields.jobTitle && !fields.company) return null;
   return { board: "smartrecruiters", fields, questions: [] };

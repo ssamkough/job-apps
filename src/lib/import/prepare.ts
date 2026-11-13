@@ -12,6 +12,7 @@ import { MAX_TEXT_CHARS, MIN_TEXT_CHARS, pageText, readJobPosting } from "./html
 import { fetchPage, FetchError, type FetchFailure } from "./safe-fetch";
 import { readPostingPdf } from "./pdf";
 import { findQuestions } from "./questions";
+import { cleanJobUrl } from "./url";
 
 export type ImportKind = "URL" | "PDF" | "TEXT";
 
@@ -29,6 +30,8 @@ export type ImportErrorCode =
  *  - `complete`: structured data had everything needed; done.
  *  - `partial`: only text is available. `fields` holds what is known for sure
  *    (including the text as the description); an AI extractor may add more.
+ *    `thin` marks a page whose text is too short to hand to an extractor: the
+ *    fields it did yield (a company or a title) are returned as they are.
  */
 export type Prepared =
   | {
@@ -46,6 +49,8 @@ export type Prepared =
       questions: string[];
       /** Cleaned text to hand to an extractor. Never persisted. */
       text: string;
+      /** The text is under MIN_TEXT_CHARS: don't queue it for an extractor. */
+      thin?: true;
       sourceUrl?: string;
     }
   | { status: "error"; code: ImportErrorCode };
@@ -60,10 +65,12 @@ function partial(
   known: ImportFields,
   sourceUrl?: string,
   questions: string[] = [],
+  thin = false,
 ): Prepared {
-  // The text itself is a sound job description even when nothing else is known.
-  const fields = sanitizeFields({ jobDescription: text, ...known });
-  return { status: "partial", kind, fields, questions, text, sourceUrl };
+  // The text itself is a sound job description even when nothing else is
+  // known, unless there is so little of it that it's likely a loading screen.
+  const fields = sanitizeFields({ ...(thin ? {} : { jobDescription: text }), ...known });
+  return { status: "partial", kind, fields, questions, text, ...(thin ? { thin: true as const } : {}), sourceUrl };
 }
 
 export async function prepareFromUrl(url: string, options: PrepareOptions = {}): Promise<Prepared> {
@@ -84,6 +91,8 @@ export async function prepareFromUrl(url: string, options: PrepareOptions = {}):
   const structured = readJobPosting(page.html, page.finalUrl);
   const meta = readPageMeta(page.html, page.finalUrl);
   const known = mergeFields(board?.fields ?? {}, mergeFields(structured ?? {}, meta));
+  // The link people save: the page we read, without how they happened to arrive.
+  known.jobUrl = cleanJobUrl(known.jobUrl ?? page.finalUrl);
 
   if (hasRequiredFields(known)) {
     // Descriptions can be thin; fall back to the page text.
@@ -101,8 +110,11 @@ export async function prepareFromUrl(url: string, options: PrepareOptions = {}):
   }
 
   const text = pageText(page.html);
-  if (text.length < MIN_TEXT_CHARS) return { status: "error", code: "no_content" };
-  return partial("URL", text, { ...known, jobUrl: page.finalUrl }, page.finalUrl, questions);
+  // Too little text to read, but a company or title that was found is still
+  // worth returning. Only a page that gave us nothing is an error.
+  const thin = text.length < MIN_TEXT_CHARS;
+  if (thin && !known.company && !known.jobTitle) return { status: "error", code: "no_content" };
+  return partial("URL", text, known, page.finalUrl, questions, thin);
 }
 
 export async function prepareFromPdf(file: File): Promise<Prepared> {

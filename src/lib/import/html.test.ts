@@ -89,6 +89,68 @@ describe("readJobPosting", () => {
     expect(readJobPosting(html)).toMatchObject({ company: "X" });
   });
 
+  describe("with several JobPostings", () => {
+    const job = (extra: object) => ({ "@type": "JobPosting", ...extra });
+    const withOrg = (title: string, extra: object = {}) =>
+      job({ title, hiringOrganization: { name: "Acme" }, ...extra });
+
+    it("prefers the posting whose url matches the page", () => {
+      const html = page({
+        "@graph": [
+          withOrg("Designer", { url: "https://acme.test/jobs/1" }),
+          withOrg("Engineer", { url: "https://www.acme.test/jobs/2/?utm_source=x" }),
+          withOrg("Writer", { url: "https://acme.test/jobs/3" }),
+        ],
+      });
+      expect(readJobPosting(html, "https://acme.test/jobs/2")).toMatchObject({ jobTitle: "Engineer" });
+    });
+
+    it("tells postings apart by their query, not just their path", () => {
+      const html = page([
+        withOrg("One", { url: "https://acme.test/jobs?id=1" }),
+        withOrg("Two", { url: "https://acme.test/jobs?id=2" }),
+      ]);
+      expect(readJobPosting(html, "https://acme.test/jobs?id=2&gh_src=z")).toMatchObject({ jobTitle: "Two" });
+    });
+
+    it("else prefers the posting whose identifier is in the page address", () => {
+      const html = page([
+        withOrg("Designer", { identifier: { "@type": "PropertyValue", value: "REQ-1001" } }),
+        withOrg("Engineer", { identifier: { "@type": "PropertyValue", value: "REQ-2002" } }),
+      ]);
+      expect(readJobPosting(html, "https://acme.test/apply?req=REQ-2002")).toMatchObject({
+        jobTitle: "Engineer",
+      });
+    });
+
+    it("else prefers one with a title and an employer", () => {
+      const html = page([
+        job({ description: "No title here" }),
+        job({ title: "Untitled org" }),
+        withOrg("Engineer"),
+      ]);
+      expect(readJobPosting(html, "https://acme.test/jobs/9")).toMatchObject({
+        company: "Acme",
+        jobTitle: "Engineer",
+      });
+    });
+
+    it("else takes the first", () => {
+      const html = page([job({ title: "First" }), job({ title: "Second" })]);
+      expect(readJobPosting(html, "https://acme.test/jobs/9")).toMatchObject({ jobTitle: "First" });
+      expect(readJobPosting(html)).toMatchObject({ jobTitle: "First" });
+    });
+  });
+
+  it("stores the page's link without tracking parameters", () => {
+    const html = page({ "@type": "JobPosting", title: "Dev", hiringOrganization: { name: "X" } });
+    expect(readJobPosting(html, "https://acme.test/jobs/1?utm_source=x&gh_src=y&id=5#apply")!.jobUrl).toBe(
+      "https://acme.test/jobs/1?id=5#apply",
+    );
+    const own = page({ "@type": "JobPosting", title: "Dev", url: "https://acme.test/j?utm_medium=z" });
+    expect(readJobPosting(own)!.jobUrl).toBe("https://acme.test/j");
+  });
+
   it("ignores values that aren't strings", () => {
     const html = page({ "@type": "JobPosting", title: { evil: 1 }, hiringOrganization: 5 });
     expect(readJobPosting(html)).toEqual({});

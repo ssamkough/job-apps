@@ -459,6 +459,115 @@ describe("errors", () => {
   });
 });
 
+describe("a page with too little text", () => {
+  // The page names a role but not who is hiring, and has no text to hand a model.
+  const SHELL = `<html><head><title>Staff Engineer</title></head><body><div id="root">Loading…</div></body></html>`;
+
+  it("still returns what it found, with a notice instead of a description", async () => {
+    await signIn();
+    h.fetchPage.mockResolvedValue({ html: SHELL, finalUrl: "https://careers.test/js?utm_source=x" });
+    const res = await post({ url: "https://careers.test/js?utm_source=x" });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      status: "done",
+      via: "text",
+      fields: { jobTitle: "Staff Engineer", jobUrl: "https://careers.test/js" },
+    });
+    expect(body.fields.company).toBeUndefined();
+    expect(body.fields.jobDescription).toBeUndefined();
+    expect(body.notice).toMatch(/very little readable text/);
+  });
+
+  it("returns whichever of company or title is known", async () => {
+    await signIn();
+    h.fetchPage.mockResolvedValue({
+      html: withLd({ title: "Staff Engineer" }).replace(`<p>${LONG}</p>`, ""),
+      finalUrl: "https://careers.test/ld",
+    });
+    const body = await (await post({ url: "https://careers.test/ld" })).json();
+    expect(body).toMatchObject({ status: "done", fields: { jobTitle: "Staff Engineer" } });
+    expect(body.fields.company).toBeUndefined();
+  });
+
+  it("is never queued for the AI worker, even when AI import is on", async () => {
+    vi.stubEnv("AI_IMPORT_ENABLED", "true");
+    setImportQueue(fakeQueue);
+    await signIn();
+    h.fetchPage.mockResolvedValue({ html: SHELL, finalUrl: "https://careers.test/js" });
+    const body = await (await post({ url: "https://careers.test/js" })).json();
+    expect(body).toMatchObject({ status: "done", via: "text", fields: { jobTitle: "Staff Engineer" } });
+    expect(queued).toHaveLength(0);
+    expect(await db.importJob.count({ where: { status: "QUEUED" } })).toBe(0);
+  });
+
+  it("is still an error when nothing at all is known", async () => {
+    await signIn();
+    h.fetchPage.mockResolvedValue({
+      html: `<html><head><title>Jobs</title></head><body><div id="root"></div></body></html>`,
+      finalUrl: "https://careers.test/empty",
+    });
+    const res = await post({ url: "https://careers.test/empty" });
+    expect(res.status).toBe(422);
+    expect((await res.json()).code).toBe("no_content");
+  });
+
+  it("does not change a page with enough text: still queued", async () => {
+    vi.stubEnv("AI_IMPORT_ENABLED", "true");
+    setImportQueue(fakeQueue);
+    await signIn();
+    h.fetchPage.mockResolvedValue({ html: PLAIN, finalUrl: "https://careers.test/p" });
+    expect((await (await post({ url: "https://careers.test/p" })).json()).status).toBe("queued");
+    expect(queued[0].text.length).toBeGreaterThanOrEqual(200);
+  });
+});
+
+describe("the stored link", () => {
+  it("drops tracking parameters but keeps what identifies the posting", async () => {
+    await signIn();
+    h.fetchPage.mockResolvedValue({
+      html: withLd({ title: "Dev", hiringOrganization: { name: "X" }, description: "<p>Do things.</p>" }),
+      finalUrl: "https://stripe.test/jobs/search?gh_jid=8172487&utm_source=x&gh_src=y#apply",
+    });
+    const body = await (await post({ url: "https://stripe.test/jobs/search?gh_jid=8172487" })).json();
+    expect(body.fields.jobUrl).toBe("https://stripe.test/jobs/search?gh_jid=8172487#apply");
+  });
+
+  it("is set from the page even when only its metadata gave company and title", async () => {
+    await signIn();
+    h.fetchPage.mockResolvedValue({
+      html: `<html><head><title>Platform Engineer | Globex</title><meta property="og:site_name" content="Globex"></head><body><main><p>${LONG}</p></main></body></html>`,
+      finalUrl: "https://careers.test/p/12?ref=linkedin",
+    });
+    const body = await (await post({ url: "https://careers.test/p/12" })).json();
+    expect(body.fields.jobUrl).toBe("https://careers.test/p/12");
+  });
+
+  it("keeps the page's own link when there are several postings in the page", async () => {
+    await signIn();
+    const ld = (title: string, url: string) => ({
+      "@context": "https://schema.org",
+      "@type": "JobPosting",
+      title,
+      url,
+      hiringOrganization: { name: "Globex" },
+      description: `<p>${title} description.</p>`,
+    });
+    h.fetchPage.mockResolvedValue({
+      html: `<html><head><script type="application/ld+json">${JSON.stringify([
+        ld("Wrong One", "https://careers.test/jobs/1"),
+        ld("Right One", "https://careers.test/jobs/2"),
+      ])}</script></head><body><main><p>${LONG}</p></main></body></html>`,
+      finalUrl: "https://careers.test/jobs/2?utm_campaign=z",
+    });
+    const body = await (await post({ url: "https://careers.test/jobs/2" })).json();
+    expect(body).toMatchObject({
+      via: "structured",
+      fields: { jobTitle: "Right One", jobUrl: "https://careers.test/jobs/2" },
+    });
+  });
+});
+
 describe("PDF and pasted text", () => {
   it("reads a PDF without storing the file", async () => {
     await signIn();

@@ -12,6 +12,7 @@ import {
 import {
   MAX_PENDING_PER_USER,
   NOTICE_NO_AI,
+  NOTICE_THIN_PAGE,
   createJob,
   failJob,
   housekeeping,
@@ -98,9 +99,10 @@ export async function POST(req: Request) {
     return json(outcomeFor(job) satisfies ImportOutcome);
   }
 
-  // Only the text is known. Hand it to the AI worker if there is one.
-  const queue = importAiEnabled() ? getImportQueue() : null;
-  let notice = NOTICE_NO_AI;
+  // Only the text is known. Hand it to the AI worker if there is one, and
+  // there is enough text for it to read.
+  const queue = importAiEnabled() && !prepared.thin ? getImportQueue() : null;
+  let notice = prepared.thin ? NOTICE_THIN_PAGE : NOTICE_NO_AI;
   if (queue) {
     if ((await pendingCount(user.id)) >= MAX_PENDING_PER_USER) {
       notice = `You already have ${MAX_PENDING_PER_USER} imports waiting. ${NOTICE_NO_AI}`;

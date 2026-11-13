@@ -48,6 +48,16 @@ describe("greenhousePosting", () => {
     expect(p.questions).toEqual(["Why Anthropic?"]);
   });
 
+  it("stores the link without tracking parameters", () => {
+    const url = "https://job-boards.greenhouse.io/anthropic/jobs/5456619008?gh_src=abc&utm_source=x";
+    expect(greenhousePosting(GREENHOUSE, url)!.fields.jobUrl).toBe(
+      "https://job-boards.greenhouse.io/anthropic/jobs/5456619008",
+    );
+    expect(smartRecruitersPosting({ name: "Dev" }, "https://jobs.smartrecruiters.com/X/1?utm_medium=y")!.fields.jobUrl).toBe(
+      "https://jobs.smartrecruiters.com/X/1",
+    );
+  });
+
   it("reads remote and hybrid location types, ignores unknown ones", () => {
     const type = (value: string) =>
       greenhousePosting({ ...GREENHOUSE, metadata: [{ name: "Work Model", value }] }, "https://x.test/")!.fields.workType;
