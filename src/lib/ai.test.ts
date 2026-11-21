@@ -3,9 +3,12 @@ import {
   AiBusyError,
   AiTimeoutError,
   AiUnavailableError,
+  buildAnswerPrompt,
   buildPrompt,
+  generateAnswerDraft,
   generateCoverLetter,
   stripThinking,
+  type AnswerDraftInput,
   type CoverLetterInput,
 } from "@/lib/ai";
 
@@ -137,5 +140,62 @@ describe("prompt building", () => {
 
   it("stripThinking leaves normal text alone", () => {
     expect(stripThinking("Dear Team,\n\nHello")).toBe("Dear Team,\n\nHello");
+  });
+});
+
+const answerInput: AnswerDraftInput = {
+  question: "Why do you want to work here?",
+  applicantName: "Jane Developer",
+  company: "Acme Robotics",
+  jobTitle: "Senior Engineer",
+  jobDescription: "Go and Postgres",
+  resumeText: "Built payment systems in Go.",
+};
+
+describe("generateAnswerDraft", () => {
+  it("asks for a short first-person answer and only facts from the resume and job", async () => {
+    fetchMock.mockResolvedValueOnce(ok("I built payment systems."));
+    const draft = await generateAnswerDraft(answerInput);
+    expect(draft).toBe("I built payment systems.");
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.model).toBe("test-model");
+    expect(body.think).toBe(false);
+    expect(body.stream).toBe(false);
+    expect(body.options.num_predict).toBe(500);
+    const system = body.messages[0].content as string;
+    const user = body.messages[1].content as string;
+    expect(system).toMatch(/first person/i);
+    expect(system).toMatch(/never invent employers, degrees, metrics/i);
+    expect(system).toMatch(/only facts from the resume text and the job description/i);
+    expect(user).toContain("Why do you want to work here?");
+    expect(user).toContain("Acme Robotics");
+    expect(user).toContain("Built payment systems in Go.");
+    expect(user).toContain("<job_description>\nGo and Postgres\n</job_description>");
+    expect(user).toMatch(/do not invent employers, degrees, or metrics/i);
+  });
+
+  it("drafts from the question alone when there is no job and no resume", () => {
+    const prompt = buildAnswerPrompt({
+      ...answerInput,
+      company: null,
+      jobTitle: null,
+      jobDescription: null,
+      resumeText: null,
+    });
+    expect(prompt).toContain("<question>\nWhy do you want to work here?\n</question>");
+    expect(prompt).toContain("Job: (not provided)");
+    expect(prompt).toContain("Resume: (not available)");
+    expect(prompt).not.toContain("Acme Robotics");
+  });
+
+  it("maps a timeout and an empty response the same way as cover letters", async () => {
+    const err = new Error("timed out");
+    err.name = "TimeoutError";
+    fetchMock.mockRejectedValueOnce(err);
+    await expect(generateAnswerDraft(answerInput)).rejects.toBeInstanceOf(AiTimeoutError);
+
+    fetchMock.mockResolvedValueOnce(ok("   "));
+    await expect(generateAnswerDraft(answerInput)).rejects.toThrow(/empty/i);
   });
 });

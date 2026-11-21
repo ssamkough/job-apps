@@ -182,7 +182,7 @@ erDiagram
         text id PK
         text label "optional variant name"
         text body
-        text source "MANUAL now; AI for drafts later"
+        text source "MANUAL or AI"
     }
     APPLICATION_QUESTION {
         text applicationId PK
@@ -214,8 +214,9 @@ chosen for that application). A question has any number of answer variants.
 Two spellings of one question ("Why us?" / "why us") resolve to a single row
 through `textKey`, so variants are never split. Deleting an application or a
 variant keeps the question; deleting a question removes it from every
-application; deleting an account removes all of it. `Answer.source` is the seam
-for drafting answers with the local model later (not built yet).
+application; deleting an account removes all of it. `Answer.source` is `MANUAL`
+for an answer written by hand and `AI` for a variant drafted with the local
+model and then saved.
 
 **How the whole system works** (services, access, data, flags and limits, and the importer) is drawn in [`docs/import-architecture.md`](docs/import-architecture.md), kept current by the Cursor rule `.cursor/rules/architecture.mdc`.
 
@@ -243,6 +244,7 @@ flagged as stale on the dashboard.
 | Submit a code | 20 per 15 min per IP, and 10 per 15 min per email |
 | Password check (change password, delete account) | 10 per 15 min per user |
 | AI cover letter (when enabled) | 15 per hour per user |
+| AI answer draft (when enabled) | 15 per hour per user, separate from cover letters |
 
 **Free-tier ceilings that matter** (details and caveats in
 [DEPLOYMENT.md](./DEPLOYMENT.md#free-tier-limits)): Neon Free gives 100
@@ -262,7 +264,7 @@ Hobby is for personal, non-commercial use.
 | Neon Object Storage | The private `resumes` bucket (S3-compatible) | [buckets](https://neon.com/docs/storage/buckets.md) · [credentials](https://neon.com/docs/storage/authentication.md) |
 | Neon shared email sender | Sends the verification and reset codes from `auth@mail.myneon.app` | [email verification](https://neon.com/docs/auth/guides/email-verification.md) |
 | Prisma | Database client and migrations | [prisma.io](https://www.prisma.io/docs) |
-| Ollama (off) | Local model for AI cover letters, only when `AI_ENABLED=true` | [ollama.com](https://ollama.com) |
+| Ollama (off) | Local model for AI cover letters and question answers, only when `AI_ENABLED=true` | [ollama.com](https://ollama.com) |
 | Uptime monitor (optional) | Not set up yet; see the interval advice in DEPLOYMENT.md | [DEPLOYMENT.md](./DEPLOYMENT.md#operations) |
 
 ## Run it locally
@@ -307,9 +309,10 @@ codes live there (in that branch's `neon_auth` schema); only a slim `User` row
   session at it is not a supported or tested path.
 - **AI drafts (off by default):** set `AI_ENABLED="true"` in `.env`, then
   `ollama pull qwen3.8:27b` (or set `OLLAMA_MODEL` to any model you have). With
-  the flag off the "Write with AI" button is hidden, `/api/cover-letter`
-  returns 404, and the cover letter is just a textarea. Drafts need a verified
-  email address. A local model takes a minute or two per letter.
+  the flag off the "Write with AI" and "Draft with AI" buttons are hidden,
+  `/api/cover-letter` and `/api/answer-draft` return 404, and the cover letter
+  is just a textarea. Drafts need a verified email address. A local model takes
+  a minute or two per letter.
 - **Dev test account:** put `Email:`, `Password:` and optional `Name:` lines in
   `.test-account.local` (gitignored; never commit it), then run
   `node --env-file=.env scripts/create-test-account.mjs --allow-host <your Neon Auth host>`.
@@ -358,7 +361,7 @@ npx playwright install chromium
 | --- | --- |
 | `src/proxy.ts` | Redirects signed-out visitors from app pages to `/login` and refreshes the SDK's session cache cookie. Not the security boundary: pages and actions check the user themselves |
 | `src/app/actions/` | Server actions: auth, account, applications, resumes. Every export here is a public endpoint, so shared helpers live in `src/lib/`, not here |
-| `src/app/api/` | `cover-letter` (AI), `resumes/[id]` (authenticated download proxy), `health` |
+| `src/app/api/` | `cover-letter` (AI), `answer-draft` (AI), `resumes/[id]` (authenticated download proxy), `health` |
 | `src/app/(auth)/` | Login, signup, verify-email (code), forgot/reset password pages |
 | `src/lib/neon-auth.ts` | Creates the Neon Auth SDK (reads `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`; session cache 60 s, SameSite lax) |
 | `src/lib/auth-api.ts` | The one door to Neon Auth: a small `AuthApi` interface over the SDK, returning `{ data, error }` |
@@ -382,8 +385,8 @@ npx playwright install chromium
 
 ## The `AI_ENABLED` flag
 
-AI cover letters are **off unless `AI_ENABLED` is exactly `"true"`**. Off means
-no button, a 404 from `/api/cover-letter`, and privacy/terms pages that don't
+AI cover letters and saved-question answers are **off unless `AI_ENABLED` is exactly `"true"`**. Off means
+no AI button, a 404 from `/api/cover-letter` and `/api/answer-draft`, and privacy/terms pages that don't
 mention AI. Production launches with it unset.
 
 ## Deploying

@@ -200,6 +200,34 @@ describe("the question library", () => {
     await deleteAnswer(a.id);
     expect(await db.answer.count({ where: { id: a.id } })).toBe(0);
   });
+
+  it("stores source AI only for a saved draft, and editing does not change it", async () => {
+    const u = await makeUser();
+    signInAs(u);
+    const q = await makeQuestion(u.id, "Why us?");
+    expect(await addAnswer(q.id, prev, form({ body: "By hand" }))).toMatchObject({ ok: true });
+    expect(await addAnswer(q.id, prev, form({ body: "From the model", source: "AI" }))).toMatchObject({
+      ok: true,
+    });
+    expect(await addAnswer(q.id, prev, form({ body: "Not a real source", source: "IMPORT" }))).toMatchObject({
+      ok: true,
+    });
+    const answers = await db.answer.findMany({ where: { questionId: q.id } });
+    expect(Object.fromEntries(answers.map((a) => [a.body, a.source]))).toEqual({
+      "By hand": "MANUAL",
+      "From the model": "AI",
+      "Not a real source": "MANUAL",
+    });
+
+    const drafted = answers.find((a) => a.body === "From the model")!;
+    expect(await updateAnswer(drafted.id, prev, form({ body: "Edited draft", source: "MANUAL" }))).toMatchObject({
+      ok: true,
+    });
+    expect(await db.answer.findUniqueOrThrow({ where: { id: drafted.id } })).toMatchObject({
+      body: "Edited draft",
+      source: "AI",
+    });
+  });
 });
 
 describe("access control", () => {

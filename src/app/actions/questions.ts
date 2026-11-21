@@ -96,7 +96,7 @@ export async function addAnswer(
 ): Promise<FormState> {
   const user = await requireUser();
   const raw = formValues(formData);
-  const parsed = answerSchema.safeParse(raw);
+  const parsed = answerSchema.safeParse({ label: raw.label, body: raw.body });
   if (!parsed.success) return { errors: fieldErrors(parsed.error), values: raw };
 
   const question = await db.question.findFirst({
@@ -111,7 +111,17 @@ export async function addAnswer(
     };
   }
 
-  await db.answer.create({ data: { questionId: question.id, ...parsed.data } });
+  // Only a draft the person chose to keep is AI. Anything else, including a
+  // missing or unexpected value, stays a manual answer.
+  const source = raw.source === "AI" ? "AI" : "MANUAL";
+  await db.answer.create({
+    data: {
+      questionId: question.id,
+      label: parsed.data.label ?? null,
+      body: parsed.data.body,
+      source,
+    },
+  });
   revalidatePath("/", "layout");
   // Clear the form after a successful add.
   return { ok: true, message: "Variant added" };

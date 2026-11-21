@@ -102,9 +102,42 @@ export function QuestionTextForm({ action, text }: { action: Action; text: strin
   );
 }
 
+type DraftResponse = {
+  draft?: string;
+  error?: string;
+  resumeUsed?: boolean;
+  resumeSkipped?: boolean;
+  application?: { company: string; jobTitle: string } | null;
+  usedMostRecent?: boolean;
+};
+
+function draftNotice(data: DraftResponse) {
+  const app = data.application;
+  const where = app ? `${app.company} · ${app.jobTitle}` : null;
+  const review = "Review and edit before saving.";
+  if (data.usedMostRecent && where) {
+    const resume = data.resumeUsed
+      ? " Your resume for that application was included."
+      : data.resumeSkipped
+        ? " Its resume couldn't be read (scanned PDFs and old .doc files aren't supported)."
+        : "";
+    return `Drafted from your most recently updated application (${where}).${resume} ${review}`;
+  }
+  if (where && data.resumeUsed) {
+    return `Drafted using your resume for ${where}. ${review}`;
+  }
+  if (where && data.resumeSkipped) {
+    return `Drafted for ${where} without your resume (it couldn't be read: scanned PDFs and old .doc files aren't supported). ${review}`;
+  }
+  if (where) return `Drafted for ${where} without a resume. ${review}`;
+  return `Drafted from the question alone. ${review}`;
+}
+
 /**
  * One variant: a name and the answer text. Used both to add a variant (the
  * form clears itself after a successful add) and to edit an existing one.
+ * When `aiEnabled` and `questionId` are set, a draft can be written into the
+ * answer box. It is not saved until the person submits the form.
  */
 export function AnswerForm({
   action,
@@ -113,6 +146,8 @@ export function AnswerForm({
   body = "",
   submitLabel,
   actions,
+  aiEnabled = false,
+  questionId,
 }: {
   action: Action;
   /** Unique per form on the page, for label/input association. */
@@ -122,9 +157,58 @@ export function AnswerForm({
   submitLabel: string;
   /** Extra buttons next to Save (copy, delete). */
   actions?: React.ReactNode;
+  /** When false this is a plain answer form: no AI button and no request. */
+  aiEnabled?: boolean;
+  /** The saved question a draft is written for. Required for the AI button. */
+  questionId?: string;
 }) {
   const [state, formAction] = useActionState(action, initial);
   const err = state.errors ?? {};
+  const canDraft = aiEnabled && !!questionId;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sourceRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [previous, setPrevious] = useState<{ text: string; source: string } | null>(null);
+
+  async function draft() {
+    const textarea = textareaRef.current;
+    if (!textarea || !questionId) return;
+
+    setLoading(true);
+    setProblem(null);
+    setNotice(null);
+
+    try {
+      const body = new FormData();
+      body.set("questionId", questionId);
+      const res = await fetch("/api/answer-draft", { method: "POST", body });
+      const data = (await res.json().catch(() => ({}))) as DraftResponse;
+      if (!res.ok) throw new Error(data.error ?? "Something went wrong.");
+      if (!data.draft) throw new Error("Couldn't generate a draft right now. Please try again.");
+
+      setPrevious({ text: textarea.value, source: sourceRef.current?.value ?? "" });
+      textarea.value = data.draft;
+      if (sourceRef.current) sourceRef.current.value = "AI";
+      textarea.focus();
+      setNotice(draftNotice(data));
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function undo() {
+    if (textareaRef.current && previous) {
+      textareaRef.current.value = previous.text;
+      if (sourceRef.current) sourceRef.current.value = previous.source;
+      setPrevious(null);
+      setNotice(null);
+    }
+  }
+
   return (
     <form action={formAction} className="space-y-3" noValidate>
       <Field label="Variant name" htmlFor={`${id}-label`} error={err.label}>
@@ -137,8 +221,34 @@ export function AnswerForm({
           className={inputClass}
         />
       </Field>
-      <Field label="Answer" htmlFor={`${id}-body`} error={err.body}>
+      {canDraft ? (
+        <input type="hidden" name="source" ref={sourceRef} defaultValue={state.values?.source === "AI" ? "AI" : ""} />
+      ) : null}
+      <div>
+        <div className="mb-1.5 flex items-center justify-between gap-3">
+          <label htmlFor={`${id}-body`} className="block text-sm font-medium text-zinc-700">
+            Answer
+          </label>
+          {canDraft && (
+            <div className="flex items-center gap-2">
+              {previous !== null && (
+                <Button variant="ghost" className="px-2 py-1 text-xs" onClick={undo}>
+                  Undo AI draft
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                className="px-2.5 py-1 text-xs"
+                onClick={draft}
+                disabled={loading}
+              >
+                {loading ? "Drafting…" : "Draft with AI"}
+              </Button>
+            </div>
+          )}
+        </div>
         <textarea
+          ref={textareaRef}
           id={`${id}-body`}
           name="body"
           rows={6}
@@ -149,7 +259,27 @@ export function AnswerForm({
           aria-invalid={!!err.body}
           aria-describedby={err.body ? `${id}-body-error` : undefined}
         />
-      </Field>
+        {canDraft && loading && (
+          <p className="mt-1.5 text-xs text-zinc-500" aria-live="polite">
+            Running on a local model: this can take a minute or two.
+          </p>
+        )}
+        {canDraft && notice && (
+          <p className="mt-1.5 text-xs text-zinc-500" aria-live="polite">
+            {notice}
+          </p>
+        )}
+        {canDraft && problem && (
+          <p role="alert" className="mt-1.5 text-sm text-rose-600">
+            {problem}
+          </p>
+        )}
+        {err.body && (
+          <p id={`${id}-body-error`} role="alert" className="mt-1.5 text-xs text-rose-600">
+            {err.body}
+          </p>
+        )}
+      </div>
       <div className="flex flex-wrap items-center justify-end gap-2">
         {state.ok && <span role="status" className="mr-auto text-sm text-emerald-700">{state.message}</span>}
         {actions}

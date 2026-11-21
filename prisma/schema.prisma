@@ -144,8 +144,8 @@ model Question {
 }
 
 // One way of answering a question (a variant): short, long, tailored to a kind
-// of role... `source` is MANUAL for everything written by hand; the planned
-// local-AI drafting will write AI variants that the person can edit.
+// of role... `source` is MANUAL for an answer written by hand, and AI when the
+// person saves a variant drafted by the local model.
 model Answer {
   id         String                @id @default(cuid())
   questionId String

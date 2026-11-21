@@ -87,7 +87,7 @@ flowchart TD
 | App (signed in) | `/dashboard`, `/applications` (+ `/new`, `/[id]`), `/questions` (+ `/[id]`), `/resumes`, `/settings`, `/admin` |
 | Auth | `/login`, `/signup`, `/verify-email`, `/forgot-password`, `/reset-password` |
 | Public | `/`, `/privacy`, `/terms` |
-| API | `/api/health`, `/api/resumes/[id]` (streams private files), `/api/cover-letter`, `/api/import`, `/api/import/[id]` |
+| API | `/api/health`, `/api/resumes/[id]` (streams private files), `/api/cover-letter`, `/api/answer-draft`, `/api/import`, `/api/import/[id]` |
 
 Sessions are cookies on one host (`www.jobapphelp.net`); Neon Auth owns
 accounts, the app keeps only the user id in `public."User"`. Security headers
@@ -116,6 +116,10 @@ lists are in `prisma/schema.prisma` and the README's data section.
 - Deleting a user cascades to everything they own. Deleting a resume keeps the
   applications that used it. Deleting an answer keeps the question and clears
   the choice. Deleting a question removes it from every application.
+- `Answer.source` is `MANUAL` for an answer written by hand and `AI` when the
+  person saves a variant filled by `POST /api/answer-draft`. The draft stays in
+  the editor until they save it. With several applications attached, the draft
+  uses the most recently updated one.
 - **Migrations are applied by hand** (not by the Vercel build): dry run on a
   throwaway Neon branch, then apply, **before** deploying code that needs them.
   See `DEPLOYMENT.md`. Never `migrate reset`.
@@ -125,7 +129,7 @@ lists are in `prisma/schema.prisma` and the README's data section.
 
 | Flag | Effect | Production |
 | --- | --- | --- |
-| `AI_ENABLED` | AI cover letters via Ollama | off |
+| `AI_ENABLED` | AI cover letters and answer drafts via Ollama | off |
 | `IMPORT_ENABLED` | "Import from a job posting" and the question finder | on |
 | `AI_IMPORT_ENABLED` | Sends text-only imports to the AI worker (needs `IMPORT_ENABLED` and a queue) | off, no queue |
 
@@ -136,6 +140,7 @@ lists are in `prisma/schema.prisma` and the README's data section.
 | Emailed codes | 15 / hour per IP; 4 / hour per email; code guesses 20 / 15 min per IP, 10 / 15 min per email |
 | Password re-check | 10 / 15 min per user |
 | AI cover letter | 15 / hour per user |
+| AI answer draft | 15 / hour per user, separate from cover letters |
 | Imports | 30 / day per user; 60 / hour per IP; AI imports 10 / day per user |
 
 | Environment | Where |
@@ -224,7 +229,6 @@ Dotted edges are designed but not built.
 
 - Importer: see "Not built" above (AI worker, JavaScript-rendered boards).
 - Importer: Lever, Ashby and Workable APIs are possible later.
-- Drafting answers to saved questions with the local model (`Answer.source = "AI"` is the seam).
 - Scheduled database backup (Neon Free has one manual snapshot only).
 - `SUPPORT_EMAIL` is unset, so the privacy and terms pages show a placeholder address.
 
@@ -236,3 +240,4 @@ Dotted edges are designed but not built.
 - Importer fix 2: company and title fall back to page metadata (`meta.ts`): `og:title`, `<title>` with the site name stripped, `<h1>`, `og:site_name`, and the employer named in a job board link.
 - Importer fix 3: page-text descriptions drop cookie banners, Apply and Share lines and footer link lists, ignore the doctype and `<title>`, and are cut at a paragraph, sentence or word instead of mid-word (`chrome.ts`, `text.ts`).
 - Importer fix 4: tracking parameters are stripped from the stored link (`url.ts`), the best of several JSON-LD `JobPosting`s is used, and a page with too little text still returns the company or title it found instead of failing.
+- Answer drafts: `POST /api/answer-draft` fills the question editor when `AI_ENABLED` is on. Saving stores `Answer.source` as `AI`, limited to 15 per hour per user, separate from cover letters.

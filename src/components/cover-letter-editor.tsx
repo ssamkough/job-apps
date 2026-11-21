@@ -3,10 +3,18 @@
 import { useRef, useState } from "react";
 import { Button, Field, inputClass } from "@/components/ui";
 
+/** Fills the instructions field and revises the current draft. */
+const TONE_PRESETS = [
+  { label: "Shorter", instructions: "Make it shorter." },
+  { label: "More specific", instructions: "Make it more specific to this role." },
+  { label: "Less formal", instructions: "Make it less formal." },
+] as const;
+
 /**
  * Cover letter textarea with an AI drafting helper. The textarea is
  * uncontrolled (so it submits with the surrounding form and resets correctly
  * after a failed save); the AI request is built from that form's fields.
+ * Tone presets fill the instructions and turn revise on for the current draft.
  */
 export function CoverLetterEditor({
   defaultValue,
@@ -28,6 +36,21 @@ export function CoverLetterEditor({
   const [notice, setNotice] = useState<string | null>(null);
   const [previous, setPrevious] = useState<string | null>(null);
 
+  function syncDraft(value: string) {
+    const has = !!value.trim();
+    setCanRevise(has);
+    if (!has) setRevise(false);
+  }
+
+  function applyPreset(nextInstructions: string) {
+    if (!textareaRef.current?.value.trim()) {
+      syncDraft("");
+      return;
+    }
+    setInstructions(nextInstructions);
+    setRevise(true);
+  }
+
   async function generate() {
     const textarea = textareaRef.current;
     if (!textarea?.form) return;
@@ -47,6 +70,7 @@ export function CoverLetterEditor({
 
       setPrevious(textarea.value);
       textarea.value = data.letter;
+      syncDraft(textarea.value);
       textarea.focus();
 
       setNotice(
@@ -66,6 +90,7 @@ export function CoverLetterEditor({
   function undo() {
     if (textareaRef.current && previous !== null) {
       textareaRef.current.value = previous;
+      syncDraft(previous);
       setPrevious(null);
       setNotice(null);
     }
@@ -118,6 +143,22 @@ export function CoverLetterEditor({
             />
           </Field>
           {canRevise && (
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Revision presets">
+              {TONE_PRESETS.map((preset) => (
+                <Button
+                  key={preset.label}
+                  variant="secondary"
+                  className="px-2.5 py-1 text-xs"
+                  disabled={loading}
+                  aria-pressed={instructions === preset.instructions}
+                  onClick={() => applyPreset(preset.instructions)}
+                >
+                  {preset.label}
+                </Button>
+              ))}
+            </div>
+          )}
+          {canRevise && (
             <label className="flex items-center gap-2 text-sm text-zinc-700">
               <input
                 type="checkbox"
@@ -159,6 +200,13 @@ export function CoverLetterEditor({
             : "Write or paste your cover letter here."
         }
         aria-invalid={!!error}
+        onChange={
+          aiEnabled
+            ? (e) => {
+                syncDraft(e.target.value);
+              }
+            : undefined
+        }
         className={inputClass}
       />
       {notice && (

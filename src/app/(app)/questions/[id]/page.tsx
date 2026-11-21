@@ -16,6 +16,7 @@ import { AnswerForm, CopyButton, QuestionTextForm } from "@/components/question-
 import { StatusBadge } from "@/components/status-badge";
 import { MAX_ANSWERS_PER_QUESTION } from "@/lib/questions";
 import { plural } from "@/lib/format";
+import { aiEnabled } from "@/lib/features";
 
 export const metadata: Metadata = { title: "Question" };
 
@@ -131,6 +132,8 @@ export default async function QuestionPage({ params }: { params: Promise<{ id: s
                   id="new-answer"
                   action={addAnswer.bind(null, question.id)}
                   submitLabel="Add answer"
+                  aiEnabled={aiEnabled()}
+                  questionId={question.id}
                 />
               </Card>
             )}

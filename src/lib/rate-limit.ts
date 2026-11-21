@@ -28,6 +28,9 @@ export const RULES = {
   // Guessing the current password from inside a logged-in session.
   passwordCheckUser: { limit: 10, windowSec: 15 * 60 },
   aiUser: { limit: 15, windowSec: 60 * 60 },
+  // Saved-question answer drafts. A separate key from aiUser, so the two
+  // don't spend each other's hourly budget.
+  aiAnswerUser: { limit: 15, windowSec: 60 * 60 },
   // Job-posting imports. Every one makes the server fetch a URL or parse a
   // file, so they are limited per person and per address.
   importUser: { limit: 30, windowSec: 24 * 60 * 60 },
