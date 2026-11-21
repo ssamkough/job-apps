@@ -3,7 +3,7 @@
 Runbook for the launch setup: **Vercel Hobby + one Neon project** providing
 Postgres, Auth and Object Storage, all on free tiers. The app goes live on its
 `*.vercel.app` URL first and has since moved to its own domain (see
-[Custom domain](#custom-domain)). **AI is off** at launch (`AI_ENABLED` unset).
+[Custom domain](#custom-domain)). **AI is on** in production (`AI_ENABLED=true`). No `OLLAMA_*` host is set, so a draft fails until one is.
 
 This repo is **public**. Never put real secrets, connection strings with
 credentials, key ids, personal emails or passwords in this file or anywhere
@@ -252,7 +252,7 @@ Every variable the code reads (checked against `process.env` in `src/` and
 | `S3_SECRET_ACCESS_KEY` | Credential secret (**shown once**, at creation or rotation) | **Yes** |
 | `SUPPORT_EMAIL` | Address shown on `/privacy` and `/terms` (defaults to a placeholder if unset) | No |
 | `CLIENT_IP_HEADER` | Leave unset: the default `x-forwarded-for` is right on Vercel, which overwrites that header | No |
-| `AI_ENABLED` | **Leave unset** (AI off) | No |
+| `AI_ENABLED` | `true` in production. Buttons show. Drafts need a reachable `OLLAMA_*` host, which is not set | No |
 | `UPLOAD_DIR`, `S3_KEY_PREFIX`, `OLLAMA_*` | Not needed on Vercel at launch (see [Later: adding AI](#later-adding-ai) for `OLLAMA_*`) | n/a |
 
 The app no longer reads `APP_URL`, `SMTP_*`, `EMAIL_FROM` or

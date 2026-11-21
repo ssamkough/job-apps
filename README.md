@@ -16,7 +16,7 @@ default) for cover letters. Hosted on Vercel; see [DEPLOYMENT.md](./DEPLOYMENT.m
 
 ## How it works
 
-*State as of Nov 2026 (the launch configuration: AI off, everything in the cloud).*
+*State as of Nov 2026. AI is on in production. No Ollama host is set, so a draft fails until one is.*
 
 ### The pieces
 
@@ -42,13 +42,13 @@ flowchart LR
 
     mail["Neon shared email sender"]
     gh["GitHub<br/>ssamkough/job-apps"]
-    ollama["Ollama<br/>local model, OFF at launch"]
+    ollama["Ollama<br/>flag on, no public host"]
 
     user -- "HTTPS" --> proxy
     app -- "sign-up, sign-in, codes (SDK)" --> auth
     app -- "Prisma, pooled connection<br/>app data and rate limits" --> pg
     app -- "S3 API: resumes, server side only" --> s3
-    app -. "only if AI_ENABLED=true" .-> ollama
+    app -. "flag on, default localhost<br/>not reachable from Vercel" .-> ollama
     auth --> mail -- "6-digit codes" --> inbox
     gh -- "push to main deploys" --> vercel
 ```
@@ -264,7 +264,7 @@ Hobby is for personal, non-commercial use.
 | Neon Object Storage | The private `resumes` bucket (S3-compatible) | [buckets](https://neon.com/docs/storage/buckets.md) · [credentials](https://neon.com/docs/storage/authentication.md) |
 | Neon shared email sender | Sends the verification and reset codes from `auth@mail.myneon.app` | [email verification](https://neon.com/docs/auth/guides/email-verification.md) |
 | Prisma | Database client and migrations | [prisma.io](https://www.prisma.io/docs) |
-| Ollama (off) | Local model for AI cover letters and question answers, only when `AI_ENABLED=true` | [ollama.com](https://ollama.com) |
+| Ollama (flag on, no host) | Local model for AI cover letters and question answers. Production has `AI_ENABLED=true` and no `OLLAMA_*` host, so a draft fails until one is set | [ollama.com](https://ollama.com) |
 | Uptime monitor (optional) | Not set up yet; see the interval advice in DEPLOYMENT.md | [DEPLOYMENT.md](./DEPLOYMENT.md#operations) |
 
 ## Run it locally
@@ -387,7 +387,7 @@ npx playwright install chromium
 
 AI cover letters and saved-question answers are **off unless `AI_ENABLED` is exactly `"true"`**. Off means
 no AI button, a 404 from `/api/cover-letter` and `/api/answer-draft`, and privacy/terms pages that don't
-mention AI. Production launches with it unset.
+mention AI. Production has it set to `true`, with no Ollama host configured.
 
 ## Deploying
 

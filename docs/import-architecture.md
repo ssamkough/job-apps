@@ -44,7 +44,7 @@ flowchart LR
 
     mail["Neon shared email sender"]
     gh["GitHub: ssamkough/job-apps"]
-    ollama["Ollama (local model)<br/>OFF"]
+    ollama["Ollama (local model)<br/>flag on, no public host"]
     worker["Import worker (Inngest)<br/>NOT BUILT"]
 
     user -- "HTTPS" --> www
@@ -55,7 +55,7 @@ flowchart LR
     app -- "Prisma, pooled connection:<br/>app data, rate limits, import jobs" --> pg
     app -- "S3 API, server side only" --> s3
     app -- "importer fetches public pages<br/>(guarded, see importer)" --> boards
-    app -. "AI_ENABLED=true" .-> ollama
+    app -. "flag on, default localhost<br/>not reachable from Vercel" .-> ollama
     app -. "AI_IMPORT_ENABLED + queue" .-> worker
     worker -.-> ollama
     worker -. "completeJob / failJob" .-> pg
@@ -129,7 +129,7 @@ lists are in `prisma/schema.prisma` and the README's data section.
 
 | Flag | Effect | Production |
 | --- | --- | --- |
-| `AI_ENABLED` | AI cover letters and answer drafts via Ollama | off |
+| `AI_ENABLED` | AI cover letters and answer drafts via Ollama | on. No `OLLAMA_*` host, so drafts call localhost and fail until one is set |
 | `IMPORT_ENABLED` | "Import from a job posting" and the question finder | on |
 | `AI_IMPORT_ENABLED` | Sends text-only imports to the AI worker (needs `IMPORT_ENABLED` and a queue) | off, no queue |
 
@@ -241,3 +241,4 @@ Dotted edges are designed but not built.
 - Importer fix 3: page-text descriptions drop cookie banners, Apply and Share lines and footer link lists, ignore the doctype and `<title>`, and are cut at a paragraph, sentence or word instead of mid-word (`chrome.ts`, `text.ts`).
 - Importer fix 4: tracking parameters are stripped from the stored link (`url.ts`), the best of several JSON-LD `JobPosting`s is used, and a page with too little text still returns the company or title it found instead of failing.
 - Answer drafts: `POST /api/answer-draft` fills the question editor when `AI_ENABLED` is on. Saving stores `Answer.source` as `AI`, limited to 15 per hour per user, separate from cover letters.
+- Production `AI_ENABLED` is `true`. No `OLLAMA_*` variables are set, so the app still targets localhost and a draft fails until a reachable host is configured.
