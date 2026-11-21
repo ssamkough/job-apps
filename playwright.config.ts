@@ -40,6 +40,9 @@ export default defineConfig({
         IMPORT_ENABLED: "true",
         OLLAMA_BASE_URL: "http://127.0.0.1:11500",
         OLLAMA_MODEL: "mock",
+        OLLAMA_INPUT_USD_PER_MILLION: "0.14",
+        OLLAMA_OUTPUT_USD_PER_MILLION: "0.40",
+        AI_MONTHLY_BUDGET_USD: "20",
         // The app talks to an in-process stand-in for Neon Auth (e2e/mock-neon-auth.mjs).
         NEON_AUTH_BASE_URL: "http://127.0.0.1:11502/neondb/auth",
         NEON_AUTH_COOKIE_SECRET: "e2e-only-cookie-secret-at-least-32-characters-long",

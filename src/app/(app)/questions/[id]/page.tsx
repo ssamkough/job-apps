@@ -17,6 +17,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { MAX_ANSWERS_PER_QUESTION } from "@/lib/questions";
 import { plural } from "@/lib/format";
 import { aiEnabled } from "@/lib/features";
+import { aiDraftsPaused } from "@/lib/ai-spend";
 
 export const metadata: Metadata = { title: "Question" };
 
@@ -24,19 +25,22 @@ export default async function QuestionPage({ params }: { params: Promise<{ id: s
   const user = await requireUser();
   const { id } = await params;
 
-  const question = await db.question.findFirst({
-    where: { id, userId: user.id },
-    include: {
-      answers: { orderBy: { createdAt: "asc" } },
-      applications: {
-        include: {
-          application: { select: { id: true, company: true, jobTitle: true, status: true } },
-          answer: { select: { id: true, label: true } },
+  const [question, aiPaused] = await Promise.all([
+    db.question.findFirst({
+      where: { id, userId: user.id },
+      include: {
+        answers: { orderBy: { createdAt: "asc" } },
+        applications: {
+          include: {
+            application: { select: { id: true, company: true, jobTitle: true, status: true } },
+            answer: { select: { id: true, label: true } },
+          },
+          orderBy: { createdAt: "desc" },
         },
-        orderBy: { createdAt: "desc" },
       },
-    },
-  });
+    }),
+    aiDraftsPaused(),
+  ]);
   if (!question) notFound();
 
   const usedByAnswer = new Map<string, number>();
@@ -133,6 +137,7 @@ export default async function QuestionPage({ params }: { params: Promise<{ id: s
                   action={addAnswer.bind(null, question.id)}
                   submitLabel="Add answer"
                   aiEnabled={aiEnabled()}
+                  aiPaused={aiPaused}
                   questionId={question.id}
                 />
               </Card>

@@ -37,6 +37,15 @@ model RateLimit {
   @@index([windowStart])
 }
 
+// One row per UTC month for the site-wide Ollama Cloud bill. Micro-dollars
+// (1 USD = 1_000_000) so the cap is an integer. `reservedMicros` is held
+// while a draft is in flight so concurrent instances can't all pass the cap.
+model AiSpend {
+  month          String @id
+  spentMicros    BigInt @default(0)
+  reservedMicros BigInt @default(0)
+}
+
 model Resume {
   id           String        @id @default(cuid())
   userId       String

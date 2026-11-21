@@ -3,7 +3,7 @@
 Runbook for the launch setup: **Vercel Hobby + one Neon project** providing
 Postgres, Auth and Object Storage, all on free tiers. The app goes live on its
 `*.vercel.app` URL first and has since moved to its own domain (see
-[Custom domain](#custom-domain)). **AI is on** in production (`AI_ENABLED=true`). No `OLLAMA_*` host is set, so a draft fails until one is.
+[Custom domain](#custom-domain)). **AI is on** in production (`AI_ENABLED=true`) and calls Ollama Cloud. Drafts pause for the rest of the UTC month once the site has spent $20.
 
 This repo is **public**. Never put real secrets, connection strings with
 credentials, key ids, personal emails or passwords in this file or anywhere
@@ -97,13 +97,15 @@ needed for that switch.
 
 **Migrations.** Migrations live in `prisma/migrations/` (`20261110184526_init`,
 `20261110235900_neon_auth_slim_user`, `20261111120000_import_job`,
-`20261112150000_questions`). All are applied to production. The questions
-migration was dry-run on a temporary Neon branch, then applied through the Neon
-tooling with its SQL, and recorded in `_prisma_migrations` with the file's
-checksum, so `prisma migrate deploy` sees it as done. Apply new migrations
-**before** deploying code that needs them. `migrate deploy` only touches the app's
-tables in `public`; it never touches `neon_auth`. Apply them from a laptop with
-the **direct** string in a gitignored file (`.env*` is ignored), then delete the
+`20261112150000_questions`, `20261121180000_ai_spend`). All are applied to
+production. The questions migration was dry-run on a temporary Neon branch,
+then applied through the Neon tooling with its SQL, and recorded in
+`_prisma_migrations` with the file's checksum, so `prisma migrate deploy` sees
+it as done. `20261121180000_ai_spend` was dry-run on a throwaway branch, then
+applied to production the same way. Apply new migrations **before** deploying
+code that needs them. `migrate deploy` only touches the app's tables in
+`public`; it never touches `neon_auth`. Apply them from a laptop with the
+**direct** string in a gitignored file (`.env*` is ignored), then delete the
 file. Never use the pooled URL.
 
 ```bash
@@ -252,8 +254,14 @@ Every variable the code reads (checked against `process.env` in `src/` and
 | `S3_SECRET_ACCESS_KEY` | Credential secret (**shown once**, at creation or rotation) | **Yes** |
 | `SUPPORT_EMAIL` | Address shown on `/privacy` and `/terms` (defaults to a placeholder if unset) | No |
 | `CLIENT_IP_HEADER` | Leave unset: the default `x-forwarded-for` is right on Vercel, which overwrites that header | No |
-| `AI_ENABLED` | `true` in production. Buttons show. Drafts need a reachable `OLLAMA_*` host, which is not set | No |
-| `UPLOAD_DIR`, `S3_KEY_PREFIX`, `OLLAMA_*` | Not needed on Vercel at launch (see [Later: adding AI](#later-adding-ai) for `OLLAMA_*`) | n/a |
+| `AI_ENABLED` | `true` in production. Buttons show while the monthly budget is open | No |
+| `OLLAMA_BASE_URL` | `https://ollama.com` | No |
+| `OLLAMA_MODEL` | `gemma4` (a cloud model that accepts `think: false`) | No |
+| `OLLAMA_API_KEY` | Key from ollama.com → API keys. Sent as `Authorization: Bearer` | **Yes** |
+| `OLLAMA_INPUT_USD_PER_MILLION` | `0.14` for `gemma4` (uncached input). Re-check [pricing](https://ollama.com/pricing) if the model changes | No |
+| `OLLAMA_OUTPUT_USD_PER_MILLION` | `0.40` for `gemma4` | No |
+| `AI_MONTHLY_BUDGET_USD` | `20`. Drafts pause for the UTC month when recorded spend reaches this | No |
+| `UPLOAD_DIR`, `S3_KEY_PREFIX` | Not set on Vercel | n/a |
 
 The app no longer reads `APP_URL`, `SMTP_*`, `EMAIL_FROM` or
 `EMAIL_DAILY_LIMIT`: Neon Auth sends the codes, and nothing builds links in
@@ -325,8 +333,10 @@ Do this as soon as the first deploy gives you the exact URL:
 - **Delete account**: the app deletes your applications, resumes and files and
   ends all sessions. The Neon Auth identity record remains; see Known
   limitations.
-- **AI is hidden**: no "Write with AI" button, `/api/cover-letter` returns 404,
-  and `/privacy` and `/terms` don't mention AI.
+- **AI drafts**: signed in, "Write with AI" is on the application form while the
+  month is under $20. A signed-out `POST /api/cover-letter` is 401. `/privacy`
+  says drafts are sent to Ollama's hosted API. At the cap the button is hidden,
+  the page says drafts are paused until next month, and both AI routes return 403.
 - **Headers**: `curl -sI https://<app>.vercel.app/login` shows
   `Content-Security-Policy`, `Strict-Transport-Security`,
   `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY` (set in
@@ -519,23 +529,33 @@ the value in Vercel (Production), then **redeploy**.
 - Limits in this document come from provider pages checked Nov 2026 and will
   drift.
 
-## Later: adding AI
+## AI drafts (Ollama Cloud)
 
-Set `AI_ENABLED=true` plus the `OLLAMA_*` variables (see `.env.example`) and
-redeploy. The model runs on **hardware you control** with Ollama (free only if
-you already own it), so the web app must be able to reach it. The privacy and
-terms pages start describing AI automatically.
+Production calls `https://ollama.com/api/chat` with `OLLAMA_API_KEY`. The model
+is `gemma4`. Apply the `AiSpend` migration before deploying the code that reads
+it. Create the key at [ollama.com](https://ollama.com) → API keys, buy about
+$20 of usage credits on the pay-as-you-go plan (a second stop if a request is
+billed and the ledger misses it), and set the variables in the table above.
+Re-check the two per-million prices when you change `OLLAMA_MODEL`.
 
-- **Ollama on your machine, app on Vercel.** Expose Ollama through a Cloudflare
+The app keeps one `AiSpend` row per UTC month. It reserves an estimate before
+each draft and records `prompt_eval_count` and `eval_count` after. At $20 the
+buttons hide and both routes return 403 with "AI drafts are paused until next
+month." A missing or non-positive price does the same, so a forgotten rate
+cannot run an open bill. The routes allow up to 300 s (`maxDuration` in
+`src/app/api/cover-letter/route.ts` and `src/app/api/answer-draft/route.ts`);
+the default `OLLAMA_TIMEOUT_MS` is 240 s.
+
+Self-hosting Ollama instead of Cloud is the same client with a different URL:
+
+- **Ollama on a machine you control, app on Vercel.** Expose Ollama through a Cloudflare
   Tunnel protected by **Cloudflare Access service-token** auth. Set
   `OLLAMA_BASE_URL` to the tunnel URL and send the token headers via
   `OLLAMA_EXTRA_HEADERS='{"CF-Access-Client-Id":"…","CF-Access-Client-Secret":"…"}'`.
-  **Never expose an unauthenticated Ollama to the internet.** A stable tunnel
-  hostname needs a domain on Cloudflare. Drafts are unavailable while your
+  Keep the price and budget variables set. **Never expose an unauthenticated Ollama to the internet.** A stable tunnel
+  hostname needs a domain on Cloudflare. Drafts are unavailable while the
   machine is off (users see a clear "unavailable" message; everything else
-  works). The route allows up to 300 s (`maxDuration` in
-  `src/app/api/cover-letter/route.ts`), matching Hobby's limit; the default
-  `OLLAMA_TIMEOUT_MS` is 240 s.
+  works).
 - **Self-hosting the whole app on the Ollama machine** (`npm run build && npm
   start`, `STORAGE_DRIVER=local` with `UPLOAD_DIR` backed up,
   `CLIENT_IP_HEADER=cf-connecting-ip` behind Cloudflare Tunnel) still needs

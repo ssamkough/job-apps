@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { RULES, hit, retryMessage } from "@/lib/rate-limit";
 import { getCurrentUser } from "@/lib/auth";
 import { aiEnabled } from "@/lib/features";
+import { AiBudgetError, AI_PAUSED_MESSAGE } from "@/lib/ai-budget";
+import { aiBudgetOpen } from "@/lib/ai-spend";
 import {
   AiBusyError,
   AiTimeoutError,
@@ -55,6 +57,10 @@ export async function POST(req: Request) {
   });
   if (!question) {
     return NextResponse.json({ error: "That question no longer exists." }, { status: 404 });
+  }
+
+  if (!(await aiBudgetOpen())) {
+    return NextResponse.json({ error: AI_PAUSED_MESSAGE }, { status: 403 });
   }
 
   // Separate key from cover letters (`ai:user:`) so the two budgets don't mix.
@@ -125,6 +131,9 @@ export async function POST(req: Request) {
     }
     if (e instanceof AiTimeoutError) {
       return NextResponse.json({ error: e.message }, { status: 504 });
+    }
+    if (e instanceof AiBudgetError) {
+      return NextResponse.json({ error: e.message }, { status: 403 });
     }
     if (e instanceof AiUnavailableError) {
       return NextResponse.json({ error: e.message }, { status: 503 });

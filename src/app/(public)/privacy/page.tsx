@@ -36,9 +36,10 @@ export default function PrivacyPage() {
 
       {aiEnabled() && (
         <Section title="How AI drafts work">
-          When you ask for a cover letter draft, the job details, your instructions, and the
-          text of the resume you select are sent to an AI model that we run ourselves. They
-          are not sent to a third-party AI company, and we don&apos;t use your content to train models.
+          When you ask for a cover letter or an answer draft, the job details, your
+          instructions, the question, and the text of the resume you select are sent to
+          Ollama&apos;s hosted API to write the draft. Ollama&apos;s published policy is that it
+          does not retain that content and does not train on it.
         </Section>
       )}
 

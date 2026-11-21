@@ -44,7 +44,7 @@ flowchart LR
 
     mail["Neon shared email sender"]
     gh["GitHub: ssamkough/job-apps"]
-    ollama["Ollama (local model)<br/>flag on, no public host"]
+    ollama["Ollama Cloud<br/>gemma4, $20 monthly cap"]
     worker["Import worker (Inngest)<br/>NOT BUILT"]
 
     user -- "HTTPS" --> www
@@ -55,7 +55,7 @@ flowchart LR
     app -- "Prisma, pooled connection:<br/>app data, rate limits, import jobs" --> pg
     app -- "S3 API, server side only" --> s3
     app -- "importer fetches public pages<br/>(guarded, see importer)" --> boards
-    app -. "flag on, default localhost<br/>not reachable from Vercel" .-> ollama
+    app -- "POST /api/chat<br/>bearer token" --> ollama
     app -. "AI_IMPORT_ENABLED + queue" .-> worker
     worker -.-> ollama
     worker -. "completeJob / failJob" .-> pg
@@ -110,8 +110,9 @@ erDiagram
     ANSWER |o--o{ APPLICATION_QUESTION : "chosen for"
 ```
 
-`RateLimit` (counters keyed by IP, email or user id) stands alone. Full column
-lists are in `prisma/schema.prisma` and the README's data section.
+`RateLimit` (counters keyed by IP, email or user id) stands alone. `AiSpend`
+is one row per UTC month (`spentMicros`, `reservedMicros`) for the Ollama Cloud
+bill. Full column lists are in `prisma/schema.prisma` and the README's data section.
 
 - Deleting a user cascades to everything they own. Deleting a resume keeps the
   applications that used it. Deleting an answer keeps the question and clears
@@ -129,7 +130,7 @@ lists are in `prisma/schema.prisma` and the README's data section.
 
 | Flag | Effect | Production |
 | --- | --- | --- |
-| `AI_ENABLED` | AI cover letters and answer drafts via Ollama | on. No `OLLAMA_*` host, so drafts call localhost and fail until one is set |
+| `AI_ENABLED` | AI cover letters and answer drafts via Ollama Cloud | on. `https://ollama.com`, model `gemma4` |
 | `IMPORT_ENABLED` | "Import from a job posting" and the question finder | on |
 | `AI_IMPORT_ENABLED` | Sends text-only imports to the AI worker (needs `IMPORT_ENABLED` and a queue) | off, no queue |
 
@@ -141,6 +142,7 @@ lists are in `prisma/schema.prisma` and the README's data section.
 | Password re-check | 10 / 15 min per user |
 | AI cover letter | 15 / hour per user |
 | AI answer draft | 15 / hour per user, separate from cover letters |
+| AI spend | $20 per UTC month for the whole site (`AiSpend`). A missing token price pauses drafts too |
 | Imports | 30 / day per user; 60 / hour per IP; AI imports 10 / day per user |
 
 | Environment | Where |
@@ -242,3 +244,4 @@ Dotted edges are designed but not built.
 - Importer fix 4: tracking parameters are stripped from the stored link (`url.ts`), the best of several JSON-LD `JobPosting`s is used, and a page with too little text still returns the company or title it found instead of failing.
 - Answer drafts: `POST /api/answer-draft` fills the question editor when `AI_ENABLED` is on. Saving stores `Answer.source` as `AI`, limited to 15 per hour per user, separate from cover letters.
 - Production `AI_ENABLED` is `true`. No `OLLAMA_*` variables are set, so the app still targets localhost and a draft fails until a reachable host is configured.
+- AI drafts call Ollama Cloud. `AiSpend` reserves each draft's estimated cost and pauses cover letters and answer drafts once the site has spent $20 in the UTC month.

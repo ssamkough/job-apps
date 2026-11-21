@@ -42,6 +42,7 @@ export function ApplicationForm({
   initial,
   resumes,
   aiEnabled = false,
+  aiPaused = false,
   submitLabel,
   saved,
   id,
@@ -52,6 +53,8 @@ export function ApplicationForm({
   initial: ApplicationFormValues;
   resumes: ResumeOption[];
   aiEnabled?: boolean;
+  /** Monthly AI budget is used up. Hides the draft button for this page. */
+  aiPaused?: boolean;
   submitLabel: string;
   saved?: boolean;
   /** DOM id, so something outside the form (the importer) can find it. */
@@ -206,6 +209,7 @@ export function ApplicationForm({
               defaultValue={v("coverLetter")}
               error={err.coverLetter}
               aiEnabled={aiEnabled}
+              aiPaused={aiPaused}
             />
           </Card>
 

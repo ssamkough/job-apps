@@ -59,6 +59,7 @@ vi.mock("@/lib/ai", async (orig) => ({
 }));
 
 import { db } from "@/lib/db";
+import { AI_PAUSED_MESSAGE, spendMonth } from "@/lib/ai-budget";
 import { resetStorageDriver, readResumeFile, saveResumeFile } from "@/lib/storage";
 import {
   createApplication,
@@ -119,6 +120,9 @@ beforeEach(async () => {
   // Rate-limit windows follow the wall clock; pin it mid-window (Date only).
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-01-01T12:07:30Z"));
+  vi.stubEnv("OLLAMA_INPUT_USD_PER_MILLION", "0.14");
+  vi.stubEnv("OLLAMA_OUTPUT_USD_PER_MILLION", "0.40");
+  vi.stubEnv("AI_MONTHLY_BUDGET_USD", "20");
   await resetDb();
   h.jar.clear();
   h.ip = "1.1.1.1";
@@ -256,6 +260,27 @@ describe("AI cover letter route", () => {
     expect(limited.status).toBe(429);
     expect(limited.headers.get("retry-after")).toBeTruthy();
     expect(generateCoverLetter).toHaveBeenCalledTimes(15);
+  });
+
+  it("pauses every draft once the month has reached the budget, without using the hourly allowance", async () => {
+    await signInAs(await makeUser({ verified: true }));
+    await db.aiSpend.create({
+      data: { month: spendMonth(), spentMicros: BigInt(20_000_000), reservedMicros: BigInt(0) },
+    });
+    const res = await post();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: AI_PAUSED_MESSAGE });
+    expect(generateCoverLetter).not.toHaveBeenCalled();
+    expect(await db.rateLimit.count()).toBe(0);
+  });
+
+  it("pauses drafts when the token prices are missing", async () => {
+    vi.stubEnv("OLLAMA_OUTPUT_USD_PER_MILLION", "");
+    await signInAs(await makeUser({ verified: true }));
+    const res = await post();
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: AI_PAUSED_MESSAGE });
+    expect(generateCoverLetter).not.toHaveBeenCalled();
   });
 
   it("the cap is per user", async () => {

@@ -32,6 +32,8 @@ http
             res.end(
               JSON.stringify({
                 message: { role: "assistant", content: "Dear Hiring Team,\n\nMOCK COVER LETTER BODY.\n\nSincerely,\nTester" },
+                prompt_eval_count: 120,
+                eval_count: 40,
                 done: true,
               }),
             ),

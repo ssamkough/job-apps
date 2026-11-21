@@ -1,8 +1,13 @@
 import "server-only";
+import { AiBudgetError, costMicros, estimateMicros } from "@/lib/ai-budget";
+import { commitAiSpend, releaseAiSpend, reserveAiSpend } from "@/lib/ai-spend";
 
 /**
- * Cover letters are written by a self-hosted Ollama model, so there are no
- * per-token costs and resume text never leaves infrastructure you control.
+ * Cover letters and answer drafts are written by Ollama Cloud
+ * (https://ollama.com). The job text, the question, the instructions, and the
+ * resume text are sent there to write the draft. Ollama's published policy is
+ * zero retention and no training on that content. A monthly cap in
+ * `ai-spend.ts` stops drafts once the site has spent its budget.
  */
 
 export class AiUnavailableError extends Error {
@@ -130,54 +135,81 @@ export const stripThinking = (s: string) =>
 
 type ChatMessage = { role: "system" | "user"; content: string };
 
+type ChatUsage = { prompt_eval_count?: unknown; eval_count?: unknown };
+
 /** One non-streaming Ollama chat completion. Callers hold the concurrency slot. */
 async function ollamaChat(
   messages: ChatMessage[],
   generation: { temperature: number; numPredict: number },
 ) {
   const cfg = config();
+  const promptChars = messages.reduce((n, message) => n + message.content.length, 0);
+  const estimate = estimateMicros(promptChars, generation.numPredict);
+  const month = estimate === null ? null : await reserveAiSpend(estimate);
+  if (estimate === null || month === null) throw new AiBudgetError();
 
-  let res: Response;
+  let settled = false;
+  const release = async () => {
+    if (settled) return;
+    await releaseAiSpend(month, estimate);
+    settled = true;
+  };
+
   try {
-    res = await fetch(`${cfg.baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...cfg.headers },
-      signal: AbortSignal.timeout(cfg.timeoutMs),
-      body: JSON.stringify({
-        model: cfg.model,
-        stream: false,
-        // Reasoning would add a long wait and isn't needed for these drafts.
-        think: false,
-        messages,
-        options: {
-          num_ctx: cfg.numCtx,
-          temperature: generation.temperature,
-          num_predict: generation.numPredict,
-        },
-      }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${cfg.baseUrl}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...cfg.headers },
+        signal: AbortSignal.timeout(cfg.timeoutMs),
+        body: JSON.stringify({
+          model: cfg.model,
+          stream: false,
+          // Reasoning would add a long wait and isn't needed for these drafts.
+          think: false,
+          messages,
+          options: {
+            num_ctx: cfg.numCtx,
+            temperature: generation.temperature,
+            num_predict: generation.numPredict,
+          },
+        }),
+      });
+    } catch (e) {
+      if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
+        throw new AiTimeoutError();
+      }
+      throw new AiUnavailableError();
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error("Ollama error", res.status, body.slice(0, 500));
+      if (res.status === 404) {
+        throw new AiUnavailableError(`model "${cfg.model}" is not installed`);
+      }
+      throw new AiUnavailableError(`status ${res.status}`);
+    }
+
+    const data = (await res.json().catch(() => null)) as
+      | (ChatUsage & { message?: { content?: string } })
+      | null;
+    const text = stripThinking(data?.message?.content ?? "");
+    if (!text) throw new Error("The AI returned an empty response. Try again.");
+
+    const promptTokens = typeof data?.prompt_eval_count === "number" ? data.prompt_eval_count : null;
+    const outputTokens = typeof data?.eval_count === "number" ? data.eval_count : null;
+    const measured =
+      promptTokens !== null && outputTokens !== null
+        ? costMicros(promptTokens, outputTokens)
+        : null;
+    await commitAiSpend(month, estimate, measured ?? estimate);
+    settled = true;
+    return text;
   } catch (e) {
-    if (e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError")) {
-      throw new AiTimeoutError();
-    }
-    throw new AiUnavailableError();
+    await release();
+    throw e;
   }
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    console.error("Ollama error", res.status, body.slice(0, 500));
-    if (res.status === 404) {
-      throw new AiUnavailableError(`model "${cfg.model}" is not installed`);
-    }
-    throw new AiUnavailableError(`status ${res.status}`);
-  }
-
-  const data = (await res.json().catch(() => null)) as {
-    message?: { content?: string };
-  } | null;
-  const text = stripThinking(data?.message?.content ?? "");
-  if (!text) throw new Error("The AI returned an empty response. Try again.");
-  return text;
 }
 
 export async function generateCoverLetter(input: CoverLetterInput) {

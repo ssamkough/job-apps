@@ -36,6 +36,7 @@ vi.mock("@/lib/ai", async (orig) => ({
 }));
 
 import { db } from "@/lib/db";
+import { AI_PAUSED_MESSAGE, spendMonth } from "@/lib/ai-budget";
 import { POST as draftAnswer } from "@/app/api/answer-draft/route";
 import { AiBusyError, AiTimeoutError, AiUnavailableError } from "@/lib/ai";
 import { resetStorageDriver, saveResumeFile } from "@/lib/storage";
@@ -89,6 +90,9 @@ beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-01-01T12:07:30Z"));
   vi.stubEnv("AI_ENABLED", "true");
+  vi.stubEnv("OLLAMA_INPUT_USD_PER_MILLION", "0.14");
+  vi.stubEnv("OLLAMA_OUTPUT_USD_PER_MILLION", "0.40");
+  vi.stubEnv("AI_MONTHLY_BUDGET_USD", "20");
   await resetDb();
   h.jar.clear();
   h.ip = "9.9.9.9";
@@ -338,6 +342,19 @@ describe("POST /api/answer-draft", () => {
     const b = await signIn();
     const qb = await makeQuestion(b.id, "Tell us about a project.");
     expect((await post(qb.id)).status).toBe(200);
+  });
+
+  it("pauses when the month is at the cap and does not call the model or the hourly limit", async () => {
+    const u = await signIn();
+    const q = await makeQuestion(u.id);
+    await db.aiSpend.create({
+      data: { month: spendMonth(), spentMicros: BigInt(19_000_000), reservedMicros: BigInt(1_000_000) },
+    });
+    const res = await post(q.id);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: AI_PAUSED_MESSAGE });
+    expect(generateAnswerDraft).not.toHaveBeenCalled();
+    expect(await db.rateLimit.count()).toBe(0);
   });
 
   it("maps AI failures to the same statuses as cover letters", async () => {

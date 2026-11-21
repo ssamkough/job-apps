@@ -13,6 +13,7 @@ import { Card } from "@/components/ui";
 import { StatusBadge } from "@/components/status-badge";
 import { ApplicationForm } from "@/components/application-form";
 import { aiEnabled } from "@/lib/features";
+import { aiDraftsPaused } from "@/lib/ai-spend";
 import { DeleteButton } from "@/components/delete-button";
 import { LocalTime } from "@/components/local-time";
 import { CopyButton } from "@/components/question-forms";
@@ -31,7 +32,7 @@ export default async function ApplicationPage({
   const { id } = await params;
   const { saved } = await searchParams;
 
-  const [app, resumes, library, attached] = await Promise.all([
+  const [app, resumes, library, attached, aiPaused] = await Promise.all([
     db.application.findFirst({
       where: { id, userId: user.id },
       include: {
@@ -46,6 +47,7 @@ export default async function ApplicationPage({
     }),
     loadQuestionLibrary(user.id),
     loadApplicationQuestions(user.id, id),
+    aiDraftsPaused(),
   ]);
   if (!app) notFound();
 
@@ -128,6 +130,7 @@ export default async function ApplicationPage({
           source: q.source === "IMPORT" ? "IMPORT" : "MANUAL",
         }))}
         aiEnabled={aiEnabled()}
+        aiPaused={aiPaused}
         submitLabel="Save changes"
         saved={saved === "1"}
       />

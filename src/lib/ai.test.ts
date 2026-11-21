@@ -11,6 +11,9 @@ import {
   type AnswerDraftInput,
   type CoverLetterInput,
 } from "@/lib/ai";
+import { AiBudgetError, spendMonth } from "@/lib/ai-budget";
+import { db } from "@/lib/db";
+import { resetDb } from "@/test/db";
 
 const input: CoverLetterInput = {
   applicantName: "Jane Developer",
@@ -23,18 +26,29 @@ const input: CoverLetterInput = {
   resumeText: "Built payment systems in Go.",
 };
 
-const ok = (content: string) =>
-  new Response(JSON.stringify({ message: { role: "assistant", content } }), { status: 200 });
+const ok = (content: string, usage?: { prompt_eval_count: number; eval_count: number }) =>
+  new Response(
+    JSON.stringify({ message: { role: "assistant", content }, ...usage }),
+    { status: 200 },
+  );
+
+function stubBudget() {
+  vi.stubEnv("OLLAMA_INPUT_USD_PER_MILLION", "0.14");
+  vi.stubEnv("OLLAMA_OUTPUT_USD_PER_MILLION", "0.40");
+  vi.stubEnv("AI_MONTHLY_BUDGET_USD", "20");
+}
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
-beforeEach(() => {
+beforeEach(async () => {
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
   vi.stubEnv("OLLAMA_BASE_URL", "http://ollama.test:11434/");
   vi.stubEnv("OLLAMA_MODEL", "test-model");
   vi.stubEnv("OLLAMA_MAX_CONCURRENCY", "1");
   vi.stubEnv("OLLAMA_MAX_QUEUE", "1");
+  stubBudget();
+  await resetDb();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -126,6 +140,38 @@ describe("generateCoverLetter", () => {
     await expect(generateCoverLetter(input)).rejects.toBeInstanceOf(AiUnavailableError);
     fetchMock.mockResolvedValueOnce(ok("recovered"));
     expect(await generateCoverLetter(input)).toBe("recovered");
+  });
+
+  it("records measured tokens and clears the reservation", async () => {
+    fetchMock.mockResolvedValueOnce(ok("Dear Team,", { prompt_eval_count: 1000, eval_count: 200 }));
+    expect(await generateCoverLetter(input)).toBe("Dear Team,");
+    const row = await db.aiSpend.findUniqueOrThrow({ where: { month: spendMonth() } });
+    // 1000 * $0.14 + 200 * $0.40 per million tokens = 220 micro-dollars.
+    expect(row.spentMicros).toBe(BigInt(220));
+    expect(row.reservedMicros).toBe(BigInt(0));
+  });
+
+  it("does not call Ollama when the month is already at the cap", async () => {
+    await db.aiSpend.create({
+      data: { month: spendMonth(), spentMicros: BigInt(20_000_000), reservedMicros: BigInt(0) },
+    });
+    await expect(generateCoverLetter(input)).rejects.toBeInstanceOf(AiBudgetError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("releases the reservation when the call fails", async () => {
+    fetchMock.mockRejectedValueOnce(new TypeError("down"));
+    await expect(generateCoverLetter(input)).rejects.toBeInstanceOf(AiUnavailableError);
+    const row = await db.aiSpend.findUniqueOrThrow({ where: { month: spendMonth() } });
+    expect(row.spentMicros).toBe(BigInt(0));
+    expect(row.reservedMicros).toBe(BigInt(0));
+  });
+
+  it("does not call Ollama when the token prices are missing", async () => {
+    vi.stubEnv("OLLAMA_INPUT_USD_PER_MILLION", "");
+    await expect(generateCoverLetter(input)).rejects.toBeInstanceOf(AiBudgetError);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await db.aiSpend.count()).toBe(0);
   });
 });
 

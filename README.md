@@ -8,15 +8,15 @@ password reset by emailed code.
 **Stack:** Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 ·
 [Neon](https://neon.com) Postgres via Prisma · [Neon Auth](https://neon.com/docs/auth/about.md)
 (managed Better Auth, through our own forms and server actions) ·
-Neon Object Storage (S3-compatible) for resumes · Ollama (local model, off by
-default) for cover letters. Hosted on Vercel; see [DEPLOYMENT.md](./DEPLOYMENT.md).
+Neon Object Storage (S3-compatible) for resumes · Ollama Cloud for cover
+letters and answer drafts. Hosted on Vercel; see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 > This repo uses a newer Next.js than most training data. Before changing
 > framework code, read the matching guide in `node_modules/next/dist/docs/`.
 
 ## How it works
 
-*State as of Nov 2026. AI is on in production. No Ollama host is set, so a draft fails until one is.*
+*State as of Nov 2026. AI is on in production and calls Ollama Cloud. Drafts pause for the rest of the UTC month once the site has spent $20.*
 
 ### The pieces
 
@@ -42,13 +42,13 @@ flowchart LR
 
     mail["Neon shared email sender"]
     gh["GitHub<br/>ssamkough/job-apps"]
-    ollama["Ollama<br/>flag on, no public host"]
+    ollama["Ollama Cloud<br/>gemma4, $20 monthly cap"]
 
     user -- "HTTPS" --> proxy
     app -- "sign-up, sign-in, codes (SDK)" --> auth
     app -- "Prisma, pooled connection<br/>app data and rate limits" --> pg
     app -- "S3 API: resumes, server side only" --> s3
-    app -. "flag on, default localhost<br/>not reachable from Vercel" .-> ollama
+    app -- "POST /api/chat<br/>bearer token" --> ollama
     auth --> mail -- "6-digit codes" --> inbox
     gh -- "push to main deploys" --> vercel
 ```
@@ -122,7 +122,7 @@ Two kinds of data live in the same Neon Postgres database, in different schemas:
 | Where | What | Who owns it |
 | --- | --- | --- |
 | `neon_auth` schema | Users (email, name, password hash), sessions, verification codes | Neon Auth. The app never writes here |
-| `public` schema | `User` (just the Neon Auth user id), `Application`, `StatusEvent`, `Resume`, `Question`, `Answer`, `ApplicationQuestion`, `ImportJob`, `RateLimit` | This app, via Prisma migrations |
+| `public` schema | `User` (just the Neon Auth user id), `Application`, `StatusEvent`, `Resume`, `Question`, `Answer`, `ApplicationQuestion`, `ImportJob`, `RateLimit`, `AiSpend` | This app, via Prisma migrations |
 | Object Storage bucket `resumes` | The resume files, keyed `{userId}/{uuid}` | This app, through one S3 credential |
 | Browser cookies | `__Secure-neon-auth.*`: the session token and a signed 60 s session cache | Set by the Neon Auth SDK |
 
@@ -199,6 +199,8 @@ erDiagram
 ```
 
 (`RateLimit` stands alone: it holds counters keyed by IP, email or user id.
+`AiSpend` is one row per UTC month: micro-dollars spent and reserved for
+Ollama Cloud.
 `Application` also stores the job URL, location, work type, salary, source,
 description, contact name and contact email; they are left out of the diagram
 for space.)
@@ -264,7 +266,7 @@ Hobby is for personal, non-commercial use.
 | Neon Object Storage | The private `resumes` bucket (S3-compatible) | [buckets](https://neon.com/docs/storage/buckets.md) · [credentials](https://neon.com/docs/storage/authentication.md) |
 | Neon shared email sender | Sends the verification and reset codes from `auth@mail.myneon.app` | [email verification](https://neon.com/docs/auth/guides/email-verification.md) |
 | Prisma | Database client and migrations | [prisma.io](https://www.prisma.io/docs) |
-| Ollama (flag on, no host) | Local model for AI cover letters and question answers. Production has `AI_ENABLED=true` and no `OLLAMA_*` host, so a draft fails until one is set | [ollama.com](https://ollama.com) |
+| Ollama Cloud | Hosted model for AI cover letters and question answers. Production sends drafts to `https://ollama.com` and pauses them once the site has spent $20 in the UTC month | [ollama.com](https://ollama.com) · [pricing](https://ollama.com/pricing) |
 | Uptime monitor (optional) | Not set up yet; see the interval advice in DEPLOYMENT.md | [DEPLOYMENT.md](./DEPLOYMENT.md#operations) |
 
 ## Run it locally
@@ -307,12 +309,16 @@ codes live there (in that branch's `neon_auth` schema); only a slim `User` row
 - The e2e suite's mock (`e2e/mock-neon-auth.mjs`) is built for the test server
   on port 3100 and accepts only that origin. Pointing a manual `npm run dev`
   session at it is not a supported or tested path.
-- **AI drafts (off by default):** set `AI_ENABLED="true"` in `.env`, then
-  `ollama pull qwen3.8:27b` (or set `OLLAMA_MODEL` to any model you have). With
-  the flag off the "Write with AI" and "Draft with AI" buttons are hidden,
+- **AI drafts (off by default):** set `AI_ENABLED="true"` in `.env`. Production
+  uses Ollama Cloud (`OLLAMA_BASE_URL=https://ollama.com`, `OLLAMA_MODEL=gemma4`,
+  `OLLAMA_API_KEY`). Locally, run Ollama and `ollama pull qwen3.8:27b` (or set
+  `OLLAMA_MODEL` to a model you have) and point `OLLAMA_BASE_URL` at
+  `http://127.0.0.1:11434`. Either way, set `AI_MONTHLY_BUDGET_USD` and the two
+  `OLLAMA_*_USD_PER_MILLION` prices. A missing price pauses drafts. With the
+  flag off, the "Write with AI" and "Draft with AI" buttons are hidden,
   `/api/cover-letter` and `/api/answer-draft` return 404, and the cover letter
-  is just a textarea. Drafts need a verified email address. A local model takes
-  a minute or two per letter.
+  is just a textarea. Drafts need a verified email address. At the monthly cap
+  the buttons hide and both routes return 403. A draft can take a minute or two.
 - **Dev test account:** put `Email:`, `Password:` and optional `Name:` lines in
   `.test-account.local` (gitignored; never commit it), then run
   `node --env-file=.env scripts/create-test-account.mjs --allow-host <your Neon Auth host>`.
@@ -370,6 +376,7 @@ npx playwright install chromium
 | `src/lib/auth.ts` | `getCurrentUser` / `requireUser` / `requireFreshUser` and lazy creation of the slim `User` row |
 | `src/lib/rate-limit.ts` | Postgres-backed fixed-window limiter (no Redis) |
 | `src/lib/ai.ts` | Ollama client with a concurrency queue and timeouts |
+| `src/lib/ai-budget.ts`, `ai-spend.ts` | Monthly micro-dollar cap. Reserves the cost of a draft, then records the tokens Ollama reports |
 | `src/lib/features.ts` | Feature flags (`AI_ENABLED`) |
 | `src/lib/questions.ts`, `question-store.ts` | Question text rules, limits and form parsing; the store that attaches questions and variants to applications, always scoped to the owner |
 | `src/lib/import/` | Posting importer: safe fetcher, JSON-LD and PDF readers, question finders (`questions.ts`), import jobs and the queue seam |
@@ -387,7 +394,9 @@ npx playwright install chromium
 
 AI cover letters and saved-question answers are **off unless `AI_ENABLED` is exactly `"true"`**. Off means
 no AI button, a 404 from `/api/cover-letter` and `/api/answer-draft`, and privacy/terms pages that don't
-mention AI. Production has it set to `true`, with no Ollama host configured.
+mention AI. Production has it set to `true` and calls Ollama Cloud. Drafts also
+pause for the rest of the UTC month once `AiSpend` reaches `AI_MONTHLY_BUDGET_USD`
+($20), or when the token prices are missing.
 
 ## Deploying
 

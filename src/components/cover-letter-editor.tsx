@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Button, Field, inputClass } from "@/components/ui";
+import { AI_PAUSED_MESSAGE } from "@/lib/ai-budget";
 
 /** Fills the instructions field and revises the current draft. */
 const TONE_PRESETS = [
@@ -20,11 +21,14 @@ export function CoverLetterEditor({
   defaultValue,
   error,
   aiEnabled = false,
+  aiPaused = false,
 }: {
   defaultValue: string;
   error?: string;
   /** When false this is a plain textarea: no AI button, panel, or request. */
   aiEnabled?: boolean;
+  /** The monthly budget is used up. The button stays hidden until next month. */
+  aiPaused?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [open, setOpen] = useState(false);
@@ -102,7 +106,10 @@ export function CoverLetterEditor({
         <label htmlFor="coverLetter" className="block text-sm font-medium text-zinc-700">
           Cover letter
         </label>
-        {aiEnabled && (
+        {aiEnabled && aiPaused && (
+          <p className="text-xs text-zinc-500">{AI_PAUSED_MESSAGE}</p>
+        )}
+        {aiEnabled && !aiPaused && (
         <div className="flex items-center gap-2">
           {previous !== null && (
             <Button variant="ghost" className="px-2 py-1 text-xs" onClick={undo}>
@@ -126,7 +133,7 @@ export function CoverLetterEditor({
         )}
       </div>
 
-      {aiEnabled && open && (
+      {aiEnabled && !aiPaused && open && (
         <div className="mb-3 space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
           <p className="text-xs text-zinc-600">
             Uses the company, job title, job description, and the resume you&apos;ve
@@ -175,7 +182,7 @@ export function CoverLetterEditor({
             </Button>
             {loading && (
               <span className="text-xs text-zinc-500" aria-live="polite">
-                Running on a local model: this can take a minute or two.
+                This can take a minute or two.
               </span>
             )}
           </div>
@@ -195,13 +202,13 @@ export function CoverLetterEditor({
         defaultValue={defaultValue}
         maxLength={10000}
         placeholder={
-          aiEnabled
+          aiEnabled && !aiPaused
             ? "Write your cover letter here, or let AI draft one."
             : "Write or paste your cover letter here."
         }
         aria-invalid={!!error}
         onChange={
-          aiEnabled
+          aiEnabled && !aiPaused
             ? (e) => {
                 syncDraft(e.target.value);
               }

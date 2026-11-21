@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { expect, request, test, type BrowserContext, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { makeDocx, makePdf } from "../src/test/files";
@@ -112,6 +113,9 @@ test.describe("desktop journey", () => {
 
     await page.getByRole("link", { name: "Privacy" }).click();
     await expect(page.getByRole("heading", { name: "Privacy Policy" })).toBeVisible();
+    if (AI) {
+      await expect(page.getByText(/hosted API/)).toBeVisible();
+    }
     await expect(page.getByRole("link", { name: "help@example.test" })).toBeVisible();
     await page.getByRole("link", { name: "Terms" }).click();
     await expect(page.getByRole("heading", { name: "Terms of Service" })).toBeVisible();
@@ -420,6 +424,32 @@ test.describe("desktop journey", () => {
     await expect(page.getByText("Saved.")).toBeVisible();
     await page.reload();
     await expect(page.getByLabel("Cover letter")).toHaveValue(/MOCK COVER LETTER BODY/);
+
+    execFileSync("psql", [
+      "postgresql://jobapps:jobapps@localhost:5432/jobapps_e2e",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      `INSERT INTO "AiSpend" ("month", "spentMicros", "reservedMicros")
+       VALUES (to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM'), 20000000, 0)
+       ON CONFLICT ("month") DO UPDATE
+       SET "spentMicros" = 20000000, "reservedMicros" = 0`,
+    ]);
+    await page.reload();
+    await expect(page.getByText("AI drafts are paused until next month.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "✨ Write with AI" })).toHaveCount(0);
+    const paused = await page.request.post("/api/cover-letter", {
+      multipart: { company: "A", jobTitle: "B" },
+    });
+    expect(paused.status()).toBe(403);
+    expect(await paused.json()).toEqual({ error: "AI drafts are paused until next month." });
+    execFileSync("psql", [
+      "postgresql://jobapps:jobapps@localhost:5432/jobapps_e2e",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      `UPDATE "AiSpend" SET "spentMicros" = 0, "reservedMicros" = 0`,
+    ]);
   });
 
   test("questions: build a library with variants, attach to an application, choose a variant, copy it", async () => {

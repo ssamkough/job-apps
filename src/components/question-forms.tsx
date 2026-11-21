@@ -9,6 +9,7 @@ import {
 } from "@/lib/questions";
 import { Button, Field, inputClass } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
+import { AI_PAUSED_MESSAGE } from "@/lib/ai-budget";
 
 type Action = (prev: FormState, formData: FormData) => Promise<FormState>;
 const initial: FormState = {};
@@ -147,6 +148,7 @@ export function AnswerForm({
   submitLabel,
   actions,
   aiEnabled = false,
+  aiPaused = false,
   questionId,
 }: {
   action: Action;
@@ -159,12 +161,14 @@ export function AnswerForm({
   actions?: React.ReactNode;
   /** When false this is a plain answer form: no AI button and no request. */
   aiEnabled?: boolean;
+  /** The monthly budget is used up. The button stays hidden until next month. */
+  aiPaused?: boolean;
   /** The saved question a draft is written for. Required for the AI button. */
   questionId?: string;
 }) {
   const [state, formAction] = useActionState(action, initial);
   const err = state.errors ?? {};
-  const canDraft = aiEnabled && !!questionId;
+  const canDraft = aiEnabled && !aiPaused && !!questionId;
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sourceRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
@@ -229,6 +233,9 @@ export function AnswerForm({
           <label htmlFor={`${id}-body`} className="block text-sm font-medium text-zinc-700">
             Answer
           </label>
+          {aiEnabled && aiPaused && questionId && (
+            <p className="text-xs text-zinc-500">{AI_PAUSED_MESSAGE}</p>
+          )}
           {canDraft && (
             <div className="flex items-center gap-2">
               {previous !== null && (
@@ -261,7 +268,7 @@ export function AnswerForm({
         />
         {canDraft && loading && (
           <p className="mt-1.5 text-xs text-zinc-500" aria-live="polite">
-            Running on a local model: this can take a minute or two.
+            This can take a minute or two.
           </p>
         )}
         {canDraft && notice && (

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { createApplication } from "@/app/actions/applications";
 import { aiEnabled, importAiEnabled, importEnabled } from "@/lib/features";
+import { aiDraftsPaused } from "@/lib/ai-spend";
 import { todayDateInput } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
 import { loadQuestionLibrary } from "@/lib/question-store";
@@ -34,13 +35,14 @@ const empty: ApplicationFormValues = {
 
 export default async function NewApplicationPage() {
   const user = await requireUser();
-  const [resumes, library] = await Promise.all([
+  const [resumes, library, aiPaused] = await Promise.all([
     db.resume.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
       select: { id: true, label: true, fileName: true },
     }),
     loadQuestionLibrary(user.id),
+    aiDraftsPaused(),
   ]);
 
   return (
@@ -59,6 +61,7 @@ export default async function NewApplicationPage() {
         resumes={resumes}
         library={library}
         aiEnabled={aiEnabled()}
+        aiPaused={aiPaused}
         submitLabel="Add application"
       />
     </>
